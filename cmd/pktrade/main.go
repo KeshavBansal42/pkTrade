@@ -6,24 +6,25 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"pktrade/internal/gen3"
 )
 
-func printSave(savePath string) {
+func printSave(savePath string) (*gen3.SaveFile, error) {
 	fmt.Printf("=== %s ===\n", savePath)
 	saveFile, err := gen3.LoadSave(savePath)
 	if err != nil {
 		fmt.Printf("Failed to load: %v\n\n", err)
-		return
+		return nil, err
 	}
 
 	trainer, err := gen3.GetTrainerInfo(saveFile.ActiveSlot)
 	if err != nil {
 		fmt.Printf("Failed to read trainer info: %v\n\n", err)
-		return
+		return nil, err
 	}
 	fmt.Printf("Trainer: %s (TID: %05d, SID: %05d)\n\n", trainer.Name, trainer.TID, trainer.SID)
 
@@ -46,6 +47,7 @@ func printSave(savePath string) {
 		}
 	}
 	fmt.Println()
+	return saveFile, nil
 }
 
 func backupFile(src string) error {
@@ -88,16 +90,19 @@ func doTrade(saveA, saveB string) {
 		return
 	}
 
-	printSave(saveA)
-	printSave(saveB)
+	saveFileA, errA := printSave(saveA)
+	saveFileB, errB := printSave(saveB)
+	if errA != nil || errB != nil {
+		return
+	}
 
 	reader := bufio.NewReader(os.Stdin)
 	
-	fmt.Printf("Enter the ID of the Pokemon to trade from %s: ", filepath.Base(saveA))
+	fmt.Printf("Enter the ID of the Party Pokemon to trade from %s: ", filepath.Base(saveA))
 	inputA, _ := reader.ReadString('\n')
 	inputA = strings.TrimSpace(inputA)
 
-	fmt.Printf("Enter the ID of the Pokemon to trade from %s: ", filepath.Base(saveB))
+	fmt.Printf("Enter the ID of the Party Pokemon to trade from %s: ", filepath.Base(saveB))
 	inputB, _ := reader.ReadString('\n')
 	inputB = strings.TrimSpace(inputB)
 
@@ -114,6 +119,42 @@ func doTrade(saveA, saveB string) {
 	}
 
 	fmt.Println("Backups verified! Ready for raw trade (Step 7).")
+
+	idxA, errA := strconv.Atoi(inputA)
+	idxB, errB := strconv.Atoi(inputB)
+	if errA != nil || errB != nil || idxA < 1 || idxA > 6 || idxB < 1 || idxB > 6 {
+		fmt.Println("Error: Invalid Party ID. Must be between 1 and 6.")
+		return
+	}
+
+	// Calculate offsets in Section 1 (starts at 0x38, each is 100 bytes)
+	offsetA := 0x38 + (idxA-1)*100
+	offsetB := 0x38 + (idxB-1)*100
+
+	sec1A := saveFileA.ActiveSlot.Sections[1]
+	sec1B := saveFileB.ActiveSlot.Sections[1]
+
+	// Perform 100-byte raw swap
+	temp := make([]byte, 100)
+	copy(temp, sec1A[offsetA:offsetA+100])
+	copy(sec1A[offsetA:offsetA+100], sec1B[offsetB:offsetB+100])
+	copy(sec1B[offsetB:offsetB+100], temp)
+
+	// Create out directory and save the files
+	os.MkdirAll("out", 0755)
+	outA := filepath.Join("out", filepath.Base(saveA))
+	outB := filepath.Join("out", filepath.Base(saveB))
+
+	if err := saveFileA.WriteToFile(outA); err != nil {
+		fmt.Printf("Failed to write %s: %v\n", outA, err)
+		return
+	}
+	if err := saveFileB.WriteToFile(outB); err != nil {
+		fmt.Printf("Failed to write %s: %v\n", outB, err)
+		return
+	}
+
+	fmt.Printf("Trade successful! Traded saves written to:\n  - %s\n  - %s\n", outA, outB)
 }
 
 func main() {

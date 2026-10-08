@@ -32,13 +32,15 @@ var sectionDataSizes = map[uint16]int{
 }
 
 type SaveSlot struct {
-	Index    uint32
-	Sections map[uint16][]byte
-	Valid    bool
+	Index          uint32
+	Sections       map[uint16][]byte
+	SectionOffsets map[uint16]int
+	Valid          bool
 }
 
 type SaveFile struct {
 	ActiveSlot *SaveSlot
+	RawData    []byte
 }
 
 func sectionChecksum(data []byte) uint16 {
@@ -76,13 +78,31 @@ func LoadSave(path string) (*SaveFile, error) {
 		return nil, fmt.Errorf("both save slots are corrupt")
 	}
 
-	return &SaveFile{ActiveSlot: active}, nil
+	return &SaveFile{ActiveSlot: active, RawData: data}, nil
+}
+
+func (sf *SaveFile) WriteToFile(path string) error {
+	outData := make([]byte, len(sf.RawData))
+	copy(outData, sf.RawData)
+
+	for id, secData := range sf.ActiveSlot.Sections {
+		offset := sf.ActiveSlot.SectionOffsets[id]
+
+		dataSize := sectionDataSizes[id]
+		newChecksum := sectionChecksum(secData[:dataSize])
+		binary.LittleEndian.PutUint16(secData[0xFF6:], newChecksum)
+
+		copy(outData[offset:offset+SectionSize], secData)
+	}
+
+	return os.WriteFile(path, outData, 0644)
 }
 
 func parseAndPrintSlot(data []byte, offset int) *SaveSlot {
 	slot := &SaveSlot{
-		Sections: make(map[uint16][]byte),
-		Valid:    true,
+		Sections:       make(map[uint16][]byte),
+		SectionOffsets: make(map[uint16]int),
+		Valid:          true,
 	}
 
 	var maxSaveIndex uint32
@@ -116,6 +136,7 @@ func parseAndPrintSlot(data []byte, offset int) *SaveSlot {
 
 		if status {
 			slot.Sections[sectionID] = sectionData
+			slot.SectionOffsets[sectionID] = secOffset
 		}
 	}
 
