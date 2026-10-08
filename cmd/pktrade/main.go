@@ -140,10 +140,30 @@ func doTrade(saveA, saveB string) {
 	copy(sec1A[offsetA:offsetA+100], sec1B[offsetB:offsetB+100])
 	copy(sec1B[offsetB:offsetB+100], temp)
 
+	// Process Trade Evolution for Save A
+	newA, evolvedA, err := gen3.ProcessTradeEvolution(sec1A[offsetA : offsetA+100])
+	if err == nil && evolvedA {
+		copy(sec1A[offsetA:offsetA+100], newA)
+		fmt.Println("The Pokemon traded to Save A evolved!")
+	}
+
+	// Process Trade Evolution for Save B
+	newB, evolvedB, err := gen3.ProcessTradeEvolution(sec1B[offsetB : offsetB+100])
+	if err == nil && evolvedB {
+		copy(sec1B[offsetB:offsetB+100], newB)
+		fmt.Println("The Pokemon traded to Save B evolved!")
+	}
+
 	// Create out directory and save the files
 	os.MkdirAll("out", 0755)
-	outA := filepath.Join("out", filepath.Base(saveA))
-	outB := filepath.Join("out", filepath.Base(saveB))
+	
+	extA := filepath.Ext(saveA)
+	baseA := strings.TrimSuffix(filepath.Base(saveA), extA)
+	outA := filepath.Join("out", fmt.Sprintf("%s_traded%s", baseA, extA))
+
+	extB := filepath.Ext(saveB)
+	baseB := strings.TrimSuffix(filepath.Base(saveB), extB)
+	outB := filepath.Join("out", fmt.Sprintf("%s_traded%s", baseB, extB))
 
 	if err := saveFileA.WriteToFile(outA); err != nil {
 		fmt.Printf("Failed to write %s: %v\n", outA, err)
@@ -154,7 +174,16 @@ func doTrade(saveA, saveB string) {
 		return
 	}
 
-	fmt.Printf("Trade successful! Traded saves written to:\n  - %s\n  - %s\n", outA, outB)
+	// Step 9: Sanity Check - Load the outputs back to ensure they aren't corrupted
+	fmt.Println("Running sanity checks on the exported files...")
+	_, errA = gen3.LoadSave(outA)
+	_, errB = gen3.LoadSave(outB)
+	if errA != nil || errB != nil {
+		fmt.Printf("CRITICAL ERROR: Sanity check failed. Output saves are corrupted!\nSave A: %v\nSave B: %v\n", errA, errB)
+		return
+	}
+
+	fmt.Printf("\nTrade successful and sanity checked!\nTraded saves written to:\n  - %s\n  - %s\n", outA, outB)
 }
 
 func main() {
