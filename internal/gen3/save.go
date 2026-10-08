@@ -50,7 +50,6 @@ func sectionChecksum(data []byte) uint16 {
 }
 
 func LoadSave(path string) (*SaveFile, error) {
-	fmt.Printf("--- Loading %s ---\n", path)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -59,24 +58,20 @@ func LoadSave(path string) (*SaveFile, error) {
 		return nil, fmt.Errorf("invalid save file size: %d bytes (expected 131072)", len(data))
 	}
 
-	slotA := parseAndPrintSlot("Slot A", data, SlotAOffset)
-	slotB := parseAndPrintSlot("Slot B", data, SlotBOffset)
+	slotA := parseAndPrintSlot(data, SlotAOffset)
+	slotB := parseAndPrintSlot(data, SlotBOffset)
 
 	var active *SaveSlot
 	if slotA.Valid && slotB.Valid {
 		if slotA.Index > slotB.Index {
 			active = slotA
-			fmt.Printf("Active slot is Slot A (Index: %d > %d)\n", slotA.Index, slotB.Index)
 		} else {
 			active = slotB
-			fmt.Printf("Active slot is Slot B (Index: %d > %d)\n", slotB.Index, slotA.Index)
 		}
 	} else if slotA.Valid {
 		active = slotA
-		fmt.Println("Active slot is Slot A (Slot B invalid)")
 	} else if slotB.Valid {
 		active = slotB
-		fmt.Println("Active slot is Slot B (Slot A invalid)")
 	} else {
 		return nil, fmt.Errorf("both save slots are corrupt")
 	}
@@ -84,8 +79,7 @@ func LoadSave(path string) (*SaveFile, error) {
 	return &SaveFile{ActiveSlot: active}, nil
 }
 
-func parseAndPrintSlot(name string, data []byte, offset int) *SaveSlot {
-	fmt.Printf("%s:\n", name)
+func parseAndPrintSlot(data []byte, offset int) *SaveSlot {
 	slot := &SaveSlot{
 		Sections: make(map[uint16][]byte),
 		Valid:    true,
@@ -107,30 +101,24 @@ func parseAndPrintSlot(name string, data []byte, offset int) *SaveSlot {
 		}
 
 		dataSize, ok := sectionDataSizes[sectionID]
-		status := "PASS"
+		status := true
 
-		if signature != Signature {
-			status = fmt.Sprintf("FAIL (Bad Sig: 0x%08X)", signature)
-			slot.Valid = false
-		} else if !ok {
-			status = fmt.Sprintf("FAIL (Unknown ID: %d)", sectionID)
+		if signature != Signature || !ok {
+			status = false
 			slot.Valid = false
 		} else {
 			actualChecksum := sectionChecksum(sectionData[:dataSize])
 			if actualChecksum != checksum {
-				status = fmt.Sprintf("FAIL (Bad Checksum: expected 0x%04X, got 0x%04X)", checksum, actualChecksum)
+				status = false
 				slot.Valid = false
 			}
 		}
 
-		fmt.Printf("  Section at offset 0x%04X: ID=%2d, SaveIndex=%5d, Status=%s\n", secOffset, sectionID, saveIndex, status)
-
-		if status == "PASS" {
+		if status {
 			slot.Sections[sectionID] = sectionData
 		}
 	}
 
 	slot.Index = maxSaveIndex
-	fmt.Printf("  -> Final Save Index: %d, Valid: %v\n", slot.Index, slot.Valid)
 	return slot
 }
