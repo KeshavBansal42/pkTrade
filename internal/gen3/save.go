@@ -51,11 +51,7 @@ func sectionChecksum(data []byte) uint16 {
 	return uint16(sum>>16) + uint16(sum)
 }
 
-func LoadSave(path string) (*SaveFile, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
+func LoadSaveFromBytes(data []byte) (*SaveFile, error) {
 	if len(data) != 131072 {
 		return nil, fmt.Errorf("invalid save file size: %d bytes (expected 131072)", len(data))
 	}
@@ -81,7 +77,15 @@ func LoadSave(path string) (*SaveFile, error) {
 	return &SaveFile{ActiveSlot: active, RawData: data}, nil
 }
 
-func (sf *SaveFile) WriteToFile(path string) error {
+func LoadSave(path string) (*SaveFile, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return LoadSaveFromBytes(data)
+}
+
+func (sf *SaveFile) WriteToBytes() []byte {
 	outData := make([]byte, len(sf.RawData))
 	copy(outData, sf.RawData)
 
@@ -95,7 +99,11 @@ func (sf *SaveFile) WriteToFile(path string) error {
 		copy(outData[offset:offset+SectionSize], secData)
 	}
 
-	return os.WriteFile(path, outData, 0644)
+	return outData
+}
+
+func (sf *SaveFile) WriteToFile(path string) error {
+	return os.WriteFile(path, sf.WriteToBytes(), 0644)
 }
 
 func parseAndPrintSlot(data []byte, offset int) *SaveSlot {

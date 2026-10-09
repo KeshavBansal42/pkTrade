@@ -3,3 +3,9 @@ pktrade-gen3-guide.md
 testdata/*
 backup/*
 out/*
+# Gomobile generated files
+*.aar
+*.jar
+
+# Temporary scaffold folder
+flutter_ui/
