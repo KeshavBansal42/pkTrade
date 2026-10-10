@@ -192,3 +192,19 @@ func GetPCBoxes(slot *SaveSlot) ([]*Pokemon, error) {
 
 	return boxed, nil
 }
+
+// Implement core.Pokemon interface
+
+func (p *Pokemon) GetSpecies() uint16 { return p.Species }
+func (p *Pokemon) GetNickname() string { return p.Nickname }
+func (p *Pokemon) GetLevel() byte { return p.Level }
+func (p *Pokemon) GetMoves() [4]uint16 { return p.Moves }
+func (p *Pokemon) GetHeldItem() uint16 { return p.HeldItem }
+func (p *Pokemon) GetTrainerName() string { return p.OTName }
+func (p *Pokemon) GetTrainerID() uint32 { return p.OTID }
+func (p *Pokemon) GetGeneration() int { return 3 }
+func (p *Pokemon) ToBytes() []byte { 
+	// TODO: Implement serialization/encryption logic
+	return nil 
+}
+func (p *Pokemon) IsChecksumValid() bool { return p.ChecksumValid }

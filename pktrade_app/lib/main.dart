@@ -222,6 +222,19 @@ class _TradeScreenState extends State<TradeScreen> {
                 "TID: ${data['tid'].toString().padLeft(5, '0')}",
                 style: const TextStyle(color: Colors.white54, fontSize: 14),
               ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFF10B981), width: 1),
+                ),
+                child: Text(
+                  "Gen ${data['generation'] ?? 3}",
+                  style: const TextStyle(color: Color(0xFF10B981), fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+              ),
             ],
           ),
         ),
