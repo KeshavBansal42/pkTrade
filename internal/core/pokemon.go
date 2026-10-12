@@ -2,6 +2,10 @@ package core
 
 // Pokemon represents the common interface for a Pokemon across all generations.
 // A generation-specific struct (e.g., gen3.Pokemon) will implement this.
+type CaptureBall interface {
+	GetCaptureBall() (byte, bool)
+}
+
 type Pokemon interface {
 	GetSpecies() uint16
 	GetNickname() string

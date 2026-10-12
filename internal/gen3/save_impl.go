@@ -1,11 +1,13 @@
 package gen3
 
 import (
+	"encoding/binary"
 	"fmt"
 	"pktrade/internal/core"
 )
 
 func init() {
+	core.RegisterTradeReady(3)
 	core.RegisterSaveParser(func(data []byte) (core.SaveFile, error) {
 		if len(data) == 131072 || len(data) == 65536 { // 128KB or 64KB Flash/SRAM
 			save, err := LoadSaveFromBytes(data)
@@ -36,28 +38,35 @@ func (s *SaveFile) GetParty() ([]core.Pokemon, error) {
 }
 
 func (s *SaveFile) InjectParty(party []core.Pokemon) error {
-	// Re-serialize logic for Gen 3 goes here. 
-	// For now, this bridges the interface.
-	sec1 := s.ActiveSlot.Sections[1]
-	
-	for i, p := range party {
-		if i >= 6 { break }
-		offset := 0x38 + (i * 100)
-		
-		gen3Poke, ok := p.(*Pokemon)
-		if !ok {
-			// In a full implementation, you'd convert UPF to gen3 bytes here.
-			// Currently returning error if not gen 3 for safety.
-			return fmt.Errorf("gen 3 writer fully implemented requires full byte generation")
-		}
-		
-		// If it's a gen 3 struct, we would re-encrypt and write.
-		// As this is scaffolding, we assume it's already there or handle byte writes.
-		_ = offset
-		_ = gen3Poke
-		_ = sec1
+	if len(party) > 6 {
+		return fmt.Errorf("party size exceeds six")
+	}
+	if s.ActiveSlot == nil {
+		return fmt.Errorf("active save slot is missing")
+	}
+	sec1, ok := s.ActiveSlot.Sections[1]
+	if !ok || len(sec1) < 0x38+6*100 {
+		return fmt.Errorf("party section is missing or truncated")
 	}
 
+	records := make([][]byte, len(party))
+	for i, pokemon := range party {
+		gen3Pokemon, ok := pokemon.(*Pokemon)
+		if !ok || len(gen3Pokemon.RawData) != 100 {
+			return fmt.Errorf("party member %d has no preserved Gen 3 party record", i+1)
+		}
+		records[i] = gen3Pokemon.RawData
+	}
+
+	for i, record := range records {
+		offset := 0x38 + i*100
+		copy(sec1[offset:offset+100], record)
+	}
+	for i := len(records); i < 6; i++ {
+		offset := 0x38 + i*100
+		clear(sec1[offset : offset+100])
+	}
+	binary.LittleEndian.PutUint32(sec1[0x34:0x38], uint32(len(records)))
 	return nil
 }
 

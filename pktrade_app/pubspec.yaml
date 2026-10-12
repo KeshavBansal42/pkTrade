@@ -57,6 +57,17 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  assets:
+    - assets/images/balls/
+
+  fonts:
+    - family: Silkscreen
+      fonts:
+        - asset: assets/fonts/Silkscreen-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Silkscreen-Bold.ttf
+          weight: 700
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

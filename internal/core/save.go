@@ -17,6 +17,21 @@ type SaveFile interface {
 // SaveFactory registers parsing functions for different generations
 var parsers []func([]byte) (SaveFile, error)
 
+// tradeReady tracks generations whose party writer has been verified to
+// round-trip a save byte-for-byte. A generation is only allowed to trade once
+// it registers here; everything else is refused rather than silently no-op'd.
+var tradeReady = map[int]bool{}
+
+// RegisterTradeReady marks a generation as having a complete, verified writer.
+func RegisterTradeReady(gen int) {
+	tradeReady[gen] = true
+}
+
+// SupportsTrade reports whether a generation can participate in a trade.
+func SupportsTrade(gen int) bool {
+	return tradeReady[gen]
+}
+
 func RegisterSaveParser(parser func([]byte) (SaveFile, error)) {
 	parsers = append(parsers, parser)
 }

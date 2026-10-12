@@ -9,3 +9,8 @@ out/*
 
 # Temporary scaffold folder
 flutter_ui/
+
+# Flutter and Android build/cache outputs
+/pktrade_app/build/
+/pktrade_app/.dart_tool/
+/pktrade_app/android/.gradle/

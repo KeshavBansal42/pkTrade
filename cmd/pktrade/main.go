@@ -88,7 +88,7 @@ func doTrade(saveA, saveB string) {
 	}
 
 	reader := bufio.NewReader(os.Stdin)
-	
+
 	fmt.Printf("Enter the ID of the Party Pokemon to trade from %s: ", filepath.Base(saveA))
 	inputA, _ := reader.ReadString('\n')
 	inputA = strings.TrimSpace(inputA)
@@ -128,8 +128,8 @@ func doTrade(saveA, saveB string) {
 		fmt.Printf("Parsed %s into Universal Format (Species: %d, Gen: %d)\n", upfA.Nickname, upfA.Species, partyA[idxA-1].GetGeneration())
 		fmt.Printf("Parsed %s into Universal Format (Species: %d, Gen: %d)\n", upfB.Nickname, upfB.Species, partyB[idxB-1].GetGeneration())
 		fmt.Println("Translating UPF structs into target generation formats...")
-		fmt.Println("------------------------\n")
-		
+		fmt.Print("------------------------\n\n")
+
 		// Swap them in memory
 		temp := partyA[idxA-1]
 		partyA[idxA-1] = partyB[idxB-1]
@@ -142,7 +142,7 @@ func doTrade(saveA, saveB string) {
 
 	// Create out directory and save the files
 	os.MkdirAll("out", 0755)
-	
+
 	extA := filepath.Ext(saveA)
 	baseA := strings.TrimSuffix(filepath.Base(saveA), extA)
 	outA := filepath.Join("out", fmt.Sprintf("%s_traded%s", baseA, extA))

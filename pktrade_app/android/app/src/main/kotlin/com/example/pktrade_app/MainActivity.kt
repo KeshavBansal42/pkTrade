@@ -3,6 +3,12 @@ package com.example.pktrade_app
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import java.io.File
+import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.UUID
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -25,6 +31,22 @@ class MainActivity: FlutterActivity() {
                     }
                     startActivityForResult(intent, 1001)
                 }
+                "previewTrade" -> {
+                    try {
+                        val uriA = Uri.parse(call.argument<String>("uriA")!!)
+                        val uriB = Uri.parse(call.argument<String>("uriB")!!)
+                        val idxA = call.argument<Int>("idxA")!!
+                        val idxB = call.argument<Int>("idxB")!!
+                        val bytesA = contentResolver.openInputStream(uriA)?.readBytes()
+                        val bytesB = contentResolver.openInputStream(uriB)?.readBytes()
+                        if (bytesA == null || bytesB == null) {
+                            error("Could not read both save files")
+                        }
+                        result.success(Mobile.previewTradeJSON(bytesA, bytesB, idxA.toLong(), idxB.toLong()))
+                    } catch (error: Exception) {
+                        result.error("PREVIEW_ERROR", error.message, null)
+                    }
+                }
                 "performTrade" -> {
                     try {
                         val uriAStr = call.argument<String>("uriA")!!
@@ -39,12 +61,33 @@ class MainActivity: FlutterActivity() {
                         val bytesB = contentResolver.openInputStream(uriB)?.readBytes()
 
                         if (bytesA != null && bytesB != null) {
-                            // Call Go gomobile Library
+                            require(uriA != uriB) { "Choose two different save files" }
+
                             val tradeResult = Mobile.performTrade(bytesA, bytesB, idxA.toLong(), idxB.toLong())
-                            
-                            // Overwrite files in-place using Android SAF
-                            contentResolver.openOutputStream(uriA, "wt")?.use { it.write(tradeResult.saveA) }
-                            contentResolver.openOutputStream(uriB, "wt")?.use { it.write(tradeResult.saveB) }
+                            val backupA = createBackup(bytesA)
+                            val backupB = try {
+                                createBackup(bytesB)
+                            } catch (error: Exception) {
+                                backupA.delete()
+                                throw error
+                            }
+
+                            try {
+                                writeDocument(uriA, tradeResult.saveA)
+                                writeDocument(uriB, tradeResult.saveB)
+                            } catch (error: Exception) {
+                                val restoreErrors = listOf(
+                                    runCatching { writeDocument(uriA, backupA.readBytes()) }.exceptionOrNull(),
+                                    runCatching { writeDocument(uriB, backupB.readBytes()) }.exceptionOrNull()
+                                ).filterNotNull()
+                                if (restoreErrors.isNotEmpty()) {
+                                    throw IllegalStateException(
+                                        "Trade write failed and rollback was incomplete. Backups: ${backupA.absolutePath}, ${backupB.absolutePath}",
+                                        error
+                                    )
+                                }
+                                throw error
+                            }
 
                             result.success(true)
                         } else {
@@ -57,6 +100,21 @@ class MainActivity: FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    private fun createBackup(bytes: ByteArray): File {
+        val directory = File(filesDir, "save-backups")
+        check(directory.exists() || directory.mkdirs()) { "Could not create save backup directory" }
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())
+        val backup = File(directory, "save-$stamp-${UUID.randomUUID()}.sav.bak")
+        FileOutputStream(backup).use { it.write(bytes) }
+        return backup
+    }
+
+    private fun writeDocument(uri: Uri, bytes: ByteArray) {
+        val stream = contentResolver.openOutputStream(uri, "wt")
+            ?: error("Could not open save file for writing")
+        stream.use { it.write(bytes) }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {

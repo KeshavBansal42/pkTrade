@@ -6,8 +6,11 @@ import (
 )
 
 type Pokemon struct {
+	RawData          []byte
 	PersonalityValue uint32
 	OTID             uint32
+	BallID           byte
+	BallKnown        bool
 	Nickname         string
 	Language         byte
 	Flags            byte
@@ -41,7 +44,7 @@ func ParsePokemon(data []byte) (*Pokemon, error) {
 		return nil, fmt.Errorf("pokemon data too short")
 	}
 
-	p := &Pokemon{}
+	p := &Pokemon{RawData: append([]byte(nil), data...)}
 	p.PersonalityValue = binary.LittleEndian.Uint32(data[0x00:])
 	p.OTID = binary.LittleEndian.Uint32(data[0x04:])
 	p.Nickname = decodeGen3String(data[0x08:0x12])
@@ -77,7 +80,7 @@ func ParsePokemon(data []byte) (*Pokemon, error) {
 	orderIdx := p.PersonalityValue % 24
 	order := subStructOrder[orderIdx]
 
-	var growth, attacks []byte
+	var growth, attacks, misc []byte
 
 	for i, block := range order {
 		blockData := decrypted[i*12 : i*12+12]
@@ -86,6 +89,17 @@ func ParsePokemon(data []byte) (*Pokemon, error) {
 			growth = blockData
 		case 'A':
 			attacks = blockData
+		case 'M':
+			misc = blockData
+		}
+	}
+
+	if p.ChecksumValid && misc != nil {
+		originsInfo := binary.LittleEndian.Uint16(misc[2:4])
+		ballID := byte((originsInfo >> 11) & 0x0F)
+		if ballID >= 1 && ballID <= 12 {
+			p.BallID = ballID
+			p.BallKnown = true
 		}
 	}
 
@@ -195,16 +209,19 @@ func GetPCBoxes(slot *SaveSlot) ([]*Pokemon, error) {
 
 // Implement core.Pokemon interface
 
-func (p *Pokemon) GetSpecies() uint16 { return p.Species }
-func (p *Pokemon) GetNickname() string { return p.Nickname }
-func (p *Pokemon) GetLevel() byte { return p.Level }
-func (p *Pokemon) GetMoves() [4]uint16 { return p.Moves }
-func (p *Pokemon) GetHeldItem() uint16 { return p.HeldItem }
+func (p *Pokemon) GetSpecies() uint16     { return p.Species }
+func (p *Pokemon) GetNickname() string    { return p.Nickname }
+func (p *Pokemon) GetLevel() byte         { return p.Level }
+func (p *Pokemon) GetMoves() [4]uint16    { return p.Moves }
+func (p *Pokemon) GetHeldItem() uint16    { return p.HeldItem }
 func (p *Pokemon) GetTrainerName() string { return p.OTName }
-func (p *Pokemon) GetTrainerID() uint32 { return p.OTID }
-func (p *Pokemon) GetGeneration() int { return 3 }
-func (p *Pokemon) ToBytes() []byte { 
-	// TODO: Implement serialization/encryption logic
-	return nil 
+func (p *Pokemon) GetTrainerID() uint32   { return p.OTID }
+func (p *Pokemon) GetGeneration() int     { return 3 }
+func (p *Pokemon) ToBytes() []byte {
+	return append([]byte(nil), p.RawData...)
+}
+
+func (p *Pokemon) GetCaptureBall() (byte, bool) {
+	return p.BallID, p.BallKnown
 }
 func (p *Pokemon) IsChecksumValid() bool { return p.ChecksumValid }

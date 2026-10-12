@@ -21,7 +21,11 @@ func init() {
 }
 
 func (s *SaveFile) Generation() int { return 5 }
-func (s *SaveFile) GetParty() ([]core.Pokemon, error) { return nil, nil }
-func (s *SaveFile) InjectParty(party []core.Pokemon) error { return nil }
+func (s *SaveFile) GetParty() ([]core.Pokemon, error) {
+	return nil, fmt.Errorf("generation 5 party reader is not implemented")
+}
+func (s *SaveFile) InjectParty(party []core.Pokemon) error {
+	return fmt.Errorf("generation 5 party writer is not implemented")
+}
 func (s *SaveFile) WriteToFile(path string) error { return os.WriteFile(path, s.data, 0644) }
-func (s *SaveFile) WriteToBytes() []byte { return s.data }
+func (s *SaveFile) WriteToBytes() []byte          { return s.data }
