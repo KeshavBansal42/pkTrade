@@ -5,10 +5,13 @@
 //   flutter test --update-goldens test/preview.dart   # refresh the renders
 //   open test/goldens/01_empty.png                    # look at them
 //
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pktrade_app/trade_screen.dart';
+import 'package:pktrade_app/widgets/box_picker.dart';
 
 const _channel = MethodChannel('com.pktrade/bridge');
 
@@ -30,6 +33,41 @@ const _saveB =
     '{"index":3,"species":75,"level":24,"nickname":"ROCKY","otName":"EE","otId":22615}'
     ']}';
 
+/// Builds the slot listing the engine would return for a save: the party
+/// plus one box with a single occupant.
+Map<String, dynamic> slotsPayload(String? partyJson) {
+  final decoded = partyJson == null
+      ? <String, dynamic>{}
+      : Map<String, dynamic>.from(jsonDecode(partyJson) as Map);
+  final party = (decoded['party'] as List?) ?? const [];
+  final slots = <Map<String, dynamic>>[];
+  for (final entry in party) {
+    final slot = Map<String, dynamic>.from(entry as Map);
+    slot['slot'] = 'party:${slot['index']}';
+    slot['empty'] = false;
+    slots.add(slot);
+  }
+  slots.add({
+    'slot': 'box:1/1',
+    'empty': false,
+    'index': 1,
+    'species': 25,
+    'level': 12,
+    'nickname': 'PIKACHU',
+    'otName': 'AAAAA',
+    'otId': 33403,
+    'ballId': 4,
+  });
+  slots.add({'slot': 'box:1/2', 'empty': true});
+  return {
+    'generation': decoded['generation'] ?? 3,
+    'boxCount': 14,
+    'boxCapacity': 30,
+    'party': party,
+    'slots': slots,
+  };
+}
+
 Future<void> _loadFonts() async {
   const fonts = {'Silkscreen': 'assets/fonts/Silkscreen-Regular.ttf'};
   for (final entry in fonts.entries) {
@@ -45,22 +83,29 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late List<String> pending;
+  late Map<String, String> selected;
 
   setUp(() {
     pending = [_saveA, _saveB];
+    selected = {};
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(_channel, (call) async {
           switch (call.method) {
             case 'selectSave':
               if (pending.isEmpty) return null;
-              return {
-                'uri': 'content://save/${pending.length}',
-                'json': pending.removeAt(0),
-              };
+              final uri = 'content://save/${pending.length}';
+              final json = pending.removeAt(0);
+              selected[uri] = json;
+              return {'uri': uri, 'json': json};
+            case 'listSlots':
+              final uri = (call.arguments as Map)['uri'] as String;
+              return jsonEncode(slotsPayload(selected[uri]));
             case 'previewTrade':
+            case 'previewSlotTrade':
               return '{"supported":true,"lossy":false,'
                   '"message":"Verified Gen 3 record swap.","losses":[]}';
             case 'performTrade':
+            case 'performSlotTrade':
               return true;
           }
           return null;
@@ -108,6 +153,19 @@ void main() {
       find.byType(TradeScreen),
       matchesGoldenFile('goldens/03_selected.png'),
     );
+
+    // Open the storage screen to show the boxes of the first save.
+    await tester.tap(find.text('BOXES').first, warnIfMissed: false);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    await expectLater(
+      find.byType(BoxPicker),
+      matchesGoldenFile('goldens/07_boxes.png'),
+    );
+    await tester.tap(find.text('CLOSE'), warnIfMissed: false);
+    await tester.pump(const Duration(milliseconds: 300));
 
     // Open the trade room and let the prompt type itself out.
     await tester.tap(find.text('TRADE'), warnIfMissed: false);

@@ -3,19 +3,26 @@ package gen2
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"strings"
 
 	"pktrade/internal/core"
+	"pktrade/internal/pokemon"
 )
 
-// PartyRecordSize is the size of a party Pokemon's data structure in Gen 2.
+// PartyRecordSize is the size of a party Pokémon's data structure in Gen 2.
 const PartyRecordSize = 48
+
+// BoxRecordSize is the stored (boxed) record size.
+const BoxRecordSize = 32
 
 // NameLength is the fixed width of the OT name and nickname fields.
 const NameLength = 11
 
-// Pokemon represents a Generation II party Pokemon. RawData keeps the exact
-// on-disk 48-byte record, and the name fields keep their exact raw bytes.
+// EggMarker is the species-list marker used for eggs in Gen 2 boxes and party.
+const EggMarker = 0xFD
+
+// Pokemon represents a Generation II Pokémon in party or boxed form.
 type Pokemon struct {
 	RawData []byte
 
@@ -35,19 +42,33 @@ type Pokemon struct {
 
 	NicknameStr string
 	OTNameStr   string
+
+	Stored  bool
+	IsEgg   bool
+	BoxNum  int
+	BoxSlot int
 }
 
-// ParsePokemon parses a 48-byte Gen 2 party record plus its nickname and OT
-// name arrays. Level is read from the party level byte at 0x1F.
 func ParsePokemon(data, nickname, otname []byte) (*Pokemon, error) {
-	if len(data) < PartyRecordSize {
-		return nil, fmt.Errorf("gen 2 record too short: %d bytes", len(data))
+	return ParsePokemonMarker(data, nickname, otname, 0)
+}
+
+// ParsePokemonMarker parses a 32-byte boxed or 48-byte party record. The
+// marker is the species-list entry, which is 0xFD for eggs.
+func ParsePokemonMarker(data, nickname, otname []byte, marker byte) (*Pokemon, error) {
+	if len(data) != BoxRecordSize && len(data) != PartyRecordSize {
+		return nil, fmt.Errorf("gen 2 record must be 32 or 48 bytes, got %d", len(data))
+	}
+	if len(nickname) != NameLength || len(otname) != NameLength {
+		return nil, fmt.Errorf("gen 2 name fields must be %d bytes", NameLength)
 	}
 
 	p := &Pokemon{
-		RawData:     append([]byte(nil), data[:PartyRecordSize]...),
+		RawData:     append([]byte(nil), data...),
 		NicknameRaw: append([]byte(nil), nickname...),
 		OTNameRaw:   append([]byte(nil), otname...),
+		Stored:      len(data) == BoxRecordSize,
+		IsEgg:       marker == EggMarker,
 	}
 	p.SpeciesID = data[0x00]
 	p.HeldItem = data[0x01]
@@ -62,7 +83,6 @@ func ParsePokemon(data, nickname, otname []byte) (*Pokemon, error) {
 
 	p.NicknameStr = decodeGen2String(p.NicknameRaw)
 	p.OTNameStr = decodeGen2String(p.OTNameRaw)
-
 	return p, nil
 }
 
@@ -80,12 +100,114 @@ func (p *Pokemon) GetTrainerName() string { return p.OTNameStr }
 func (p *Pokemon) GetTrainerID() uint32   { return uint32(p.OTID) }
 func (p *Pokemon) GetGeneration() int     { return 2 }
 func (p *Pokemon) ToBytes() []byte        { return append([]byte(nil), p.RawData...) }
-func (p *Pokemon) IsChecksumValid() bool  { return true } // validated at the save level
+func (p *Pokemon) IsChecksumValid() bool  { return true }
+
+func (p *Pokemon) NationalID() uint16 {
+	if p.SpeciesID == 0 || p.SpeciesID > 251 {
+		return 0
+	}
+	return uint16(p.SpeciesID)
+}
+
+func (p *Pokemon) TradeBlockReason() string {
+	if p.SpeciesID == 0 {
+		return "the record has no species"
+	}
+	if p.IsEgg {
+		return "eggs cannot be traded"
+	}
+	if p.NationalID() == 0 {
+		return "the record's species has no National Dex mapping"
+	}
+	if p.LevelVal == 0 || p.LevelVal > 100 {
+		return "the record's level is invalid"
+	}
+	return ""
+}
+
+func (p *Pokemon) clone() *Pokemon {
+	out := *p
+	out.RawData = append([]byte(nil), p.RawData...)
+	out.NicknameRaw = append([]byte(nil), p.NicknameRaw...)
+	out.OTNameRaw = append([]byte(nil), p.OTNameRaw...)
+	return &out
+}
+
+func (p *Pokemon) ToPartyData() ([]byte, error) {
+	if len(p.RawData) == PartyRecordSize {
+		return append([]byte(nil), p.RawData...), nil
+	}
+	if len(p.RawData) != BoxRecordSize {
+		return nil, fmt.Errorf("gen 2 record is truncated")
+	}
+	out := make([]byte, PartyRecordSize)
+	copy(out, p.RawData)
+	out[0x20] = 0 // status
+	out[0x21] = 0 // mail
+	stats, err := p.partyStats()
+	if err != nil {
+		return nil, err
+	}
+	put := func(offset int, value uint16) { binary.BigEndian.PutUint16(out[offset:], value) }
+	put(0x22, stats[0])
+	put(0x24, stats[0])
+	put(0x26, stats[1])
+	put(0x28, stats[2])
+	put(0x2A, stats[3])
+	put(0x2C, stats[4])
+	put(0x2E, stats[5])
+	return out, nil
+}
+
+func (p *Pokemon) ToBoxData() ([]byte, error) {
+	if len(p.RawData) == BoxRecordSize {
+		return append([]byte(nil), p.RawData...), nil
+	}
+	if len(p.RawData) != PartyRecordSize {
+		return nil, fmt.Errorf("gen 2 record is truncated")
+	}
+	return append([]byte(nil), p.RawData[:BoxRecordSize]...), nil
+}
+
+func (p *Pokemon) partyStats() ([6]uint16, error) {
+	national := p.NationalID()
+	if national == 0 || int(national) >= len(pokemon.BaseStats2) {
+		return [6]uint16{}, fmt.Errorf("unknown species %d", p.SpeciesID)
+	}
+	base := pokemon.BaseStats2[national]
+	level := int(p.LevelVal)
+	if level < 1 {
+		level = 1
+	}
+	if level > 100 {
+		level = 100
+	}
+	dv := p.DVs
+	atk := int(dv & 0xF)
+	def := int((dv >> 4) & 0xF)
+	spe := int((dv >> 8) & 0xF)
+	spc := int((dv >> 12) & 0xF)
+	hpDV := ((atk & 1) << 3) | ((def & 1) << 2) | ((spe & 1) << 1) | (spc & 1)
+	statExp := func(offset int) int { return int(binary.BigEndian.Uint16(p.RawData[offset:])) }
+	calc := func(base, dv, exp int, hp bool) int {
+		value := ((base+dv)*2 + int(math.Sqrt(float64(exp)))/4) * level / 100
+		if hp {
+			return value + level + 10
+		}
+		return value + 5
+	}
+	return [6]uint16{
+		uint16(calc(base.HP, hpDV, statExp(0x0B), true)),
+		uint16(calc(base.Atk, atk, statExp(0x0D), false)),
+		uint16(calc(base.Def, def, statExp(0x0F), false)),
+		uint16(calc(base.Spe, spe, statExp(0x11), false)),
+		uint16(calc(base.SpA, spc, statExp(0x13), false)),
+		uint16(calc(base.SpD, spc, statExp(0x13), false)),
+	}, nil
+}
 
 var _ core.Pokemon = (*Pokemon)(nil)
 
-// gen2Charset maps the Western Generation II character codes that appear in
-// names to their text equivalents.
 var gen2Charset = func() map[byte]string {
 	m := map[byte]string{
 		0x7F: " ",
@@ -116,4 +238,31 @@ func decodeGen2String(data []byte) string {
 		}
 	}
 	return b.String()
+}
+
+func encodeGen2String(value string, length int) []byte {
+	out := make([]byte, length)
+	for i := range out {
+		out[i] = 0x50
+	}
+	for i := 0; i < len(value) && i < length; i++ {
+		c := value[i]
+		switch {
+		case c >= 'A' && c <= 'Z':
+			out[i] = 0x80 + (c - 'A')
+		case c >= 'a' && c <= 'z':
+			out[i] = 0xA0 + (c - 'a')
+		case c >= '0' && c <= '9':
+			out[i] = 0xF6 + (c - '0')
+		case c == ' ':
+			out[i] = 0x7F
+		case c == '-':
+			out[i] = 0xE3
+		case c == '.':
+			out[i] = 0xE8
+		default:
+			out[i] = 0x7F
+		}
+	}
+	return out
 }

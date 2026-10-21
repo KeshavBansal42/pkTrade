@@ -57,6 +57,9 @@ func saveWithParty(records ...[]byte) []byte {
 	for slotIndex, slotOffset := range []int{gen3.SlotAOffset, gen3.SlotBOffset} {
 		for physicalIndex := 0; physicalIndex < gen3.SectionsPerSlot; physicalIndex++ {
 			section := make([]byte, gen3.SectionSize)
+			if physicalIndex == 0 {
+				binary.LittleEndian.PutUint32(section[0xAC:], 1)
+			}
 			binary.LittleEndian.PutUint16(section[0xFF4:], uint16(physicalIndex))
 			binary.LittleEndian.PutUint32(section[0xFF8:], gen3.Signature)
 			binary.LittleEndian.PutUint32(section[0xFFC:], uint32(1-slotIndex))
@@ -189,6 +192,9 @@ func gen1SaveForMobile(records ...[]byte) []byte {
 		data[0x2F2D+i] = rec[0]
 	}
 	data[0x2F2D+len(records)] = 0xFF
+	// The current box copy has to be a well-formed list as well.
+	data[0x30C0] = 0
+	data[0x30C1] = 0xFF
 	var sum byte
 	for i := 0x2598; i <= 0x3522; i++ {
 		sum += data[i]
@@ -242,15 +248,17 @@ func TestPreviewTradeBlocksCrossGeneration(t *testing.T) {
 	}
 }
 
-func TestPreviewTradeBlocksGenerationWithoutWriter(t *testing.T) {
-	// A 512 KiB file is claimed by the Generation 4 parser, which has no writer.
+func TestPreviewTradeBlocksUnparsableSave(t *testing.T) {
+	// A 512 KiB blob of zeroes has no valid save structure. Every generation
+	// parser validates its own checksums, so the file is refused outright
+	// instead of being mistaken for an unsupported generation.
 	saveA := make([]byte, 524288)
 	saveB := make([]byte, 524288)
 	preview := PreviewTrade(saveA, saveB, 1, 1)
 	if preview.Supported {
-		t.Fatal("generation without a verified writer must not be runnable")
+		t.Fatal("a file that is not a valid save must not be tradeable")
 	}
-	if !strings.Contains(preview.Message, "Gen 4") {
-		t.Fatalf("preview should name the unsupported generation: %s", preview.Message)
+	if !strings.Contains(preview.Message, "could not be read") {
+		t.Fatalf("preview should explain that the save could not be read: %s", preview.Message)
 	}
 }

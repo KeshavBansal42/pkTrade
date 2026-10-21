@@ -1,3 +1,5 @@
+import 'species_names.dart';
+
 /// National Dex names, generations 1-3. The engine hands the UI a raw species
 /// id, and "Species ID: 7" tells a player nothing, so the roster can name what
 /// it is actually holding. Anything outside this range falls back to a number
@@ -149,8 +151,13 @@ int? toNationalId(int storedSpecies, int generation) {
 String? speciesNameFor(int storedSpecies, int generation) {
   final national = toNationalId(storedSpecies, generation);
   if (national == null) return null;
-  if (national < 1 || national >= _dex.length) return null;
-  return _dex[national];
+  if (generation <= 3) {
+    if (national < 1 || national >= _dex.length) return null;
+    return _dex[national];
+  }
+  // Generations 4 and later store the National Dex number directly.
+  if (national < 1 || national >= modernDex.length) return null;
+  return modernDex[national];
 }
 
 /// Readable species label: the real name when known, otherwise an honest

@@ -97,6 +97,85 @@ class MainActivity: FlutterActivity() {
                         result.error("TRADE_ERROR", e.message, null)
                     }
                 }
+                "listSlots" -> {
+                    try {
+                        val uri = Uri.parse(call.argument<String>("uri")!!)
+                        val includeEmpty = call.argument<Boolean>("includeEmpty") ?: false
+                        val bytes = contentResolver.openInputStream(uri)?.readBytes()
+                        if (bytes == null) {
+                            error("Could not read the save file")
+                        }
+                        result.success(Mobile.listSlotsJSON(bytes, includeEmpty))
+                    } catch (error: Exception) {
+                        result.error("SLOTS_ERROR", error.message, null)
+                    }
+                }
+                "previewSlotTrade" -> {
+                    try {
+                        val uriA = Uri.parse(call.argument<String>("uriA")!!)
+                        val uriB = Uri.parse(call.argument<String>("uriB")!!)
+                        val slotA = call.argument<String>("slotA")!!
+                        val slotB = call.argument<String>("slotB")!!
+                        val bytesA = contentResolver.openInputStream(uriA)?.readBytes()
+                        val bytesB = contentResolver.openInputStream(uriB)?.readBytes()
+                        if (bytesA == null || bytesB == null) {
+                            error("Could not read both save files")
+                        }
+                        result.success(Mobile.previewSlotTradeJSON(bytesA, bytesB, slotA, slotB))
+                    } catch (error: Exception) {
+                        result.error("PREVIEW_ERROR", error.message, null)
+                    }
+                }
+                "performSlotTrade" -> {
+                    try {
+                        val uriAStr = call.argument<String>("uriA")!!
+                        val uriBStr = call.argument<String>("uriB")!!
+                        val slotA = call.argument<String>("slotA")!!
+                        val slotB = call.argument<String>("slotB")!!
+
+                        val uriA = Uri.parse(uriAStr)
+                        val uriB = Uri.parse(uriBStr)
+
+                        val bytesA = contentResolver.openInputStream(uriA)?.readBytes()
+                        val bytesB = contentResolver.openInputStream(uriB)?.readBytes()
+
+                        if (bytesA != null && bytesB != null) {
+                            require(uriA != uriB) { "Choose two different save files" }
+
+                            val tradeResult = Mobile.performSlotTrade(bytesA, bytesB, slotA, slotB)
+                            val backupA = createBackup(bytesA)
+                            val backupB = try {
+                                createBackup(bytesB)
+                            } catch (error: Exception) {
+                                backupA.delete()
+                                throw error
+                            }
+
+                            try {
+                                writeDocument(uriA, tradeResult.saveA)
+                                writeDocument(uriB, tradeResult.saveB)
+                            } catch (error: Exception) {
+                                val restoreErrors = listOf(
+                                    runCatching { writeDocument(uriA, backupA.readBytes()) }.exceptionOrNull(),
+                                    runCatching { writeDocument(uriB, backupB.readBytes()) }.exceptionOrNull()
+                                ).filterNotNull()
+                                if (restoreErrors.isNotEmpty()) {
+                                    throw IllegalStateException(
+                                        "Trade write failed and rollback was incomplete. Backups: ${backupA.absolutePath}, ${backupB.absolutePath}",
+                                        error
+                                    )
+                                }
+                                throw error
+                            }
+
+                            result.success(true)
+                        } else {
+                            result.error("IO_ERROR", "Could not read save files", null)
+                        }
+                    } catch (e: Exception) {
+                        result.error("TRADE_ERROR", e.message, null)
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
@@ -115,6 +194,13 @@ class MainActivity: FlutterActivity() {
         val stream = contentResolver.openOutputStream(uri, "wt")
             ?: error("Could not open save file for writing")
         stream.use { it.write(bytes) }
+        // Read the document back so a provider that silently dropped or
+        // truncated the write cannot leave a damaged save behind.
+        val written = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            ?: error("Could not read the save file back after writing")
+        if (!written.contentEquals(bytes)) {
+            error("The save file did not keep the new data")
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {

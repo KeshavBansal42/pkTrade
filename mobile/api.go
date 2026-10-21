@@ -3,6 +3,7 @@ package mobile
 import (
 	"encoding/json"
 	"fmt"
+
 	"pktrade/internal/core"
 	_ "pktrade/internal/gen1"
 	_ "pktrade/internal/gen2"
@@ -17,42 +18,64 @@ import (
 type PokemonResponse struct {
 	Index    int    `json:"index"`
 	Species  uint16 `json:"species"`
+	National uint16 `json:"national,omitempty"`
 	BallID   *byte  `json:"ballId,omitempty"`
 	Level    byte   `json:"level"`
 	Nickname string `json:"nickname"`
 	OTName   string `json:"otName"`
 	OTID     uint16 `json:"otId"`
+	HeldItem uint16 `json:"heldItem,omitempty"`
+	Slot     string `json:"slot,omitempty"`
+	IsEgg    bool   `json:"isEgg,omitempty"`
+	Checksum bool   `json:"checksumValid"`
 }
 
 type PartyResponse struct {
 	Generation  int               `json:"generation"`
+	Game        string            `json:"game,omitempty"`
+	Family      string            `json:"family,omitempty"`
 	TrainerName string            `json:"trainerName"`
 	TID         uint16            `json:"tid"`
 	SID         uint16            `json:"sid"`
 	Party       []PokemonResponse `json:"party"`
 }
 
-// ParsePartyJSON parses a save file byte array and returns the Party Pokemon as a JSON string.
-// This makes it extremely easy to render the UI natively in Kotlin/Flutter.
+type SlotEntryResponse struct {
+	Slot     string `json:"slot"`
+	Empty    bool   `json:"empty"`
+	Index    int    `json:"index,omitempty"`
+	Species  uint16 `json:"species,omitempty"`
+	National uint16 `json:"national,omitempty"`
+	Level    byte   `json:"level,omitempty"`
+	Nickname string `json:"nickname,omitempty"`
+	OTName   string `json:"otName,omitempty"`
+	OTID     uint16 `json:"otId,omitempty"`
+	HeldItem uint16 `json:"heldItem,omitempty"`
+	BallID   *byte  `json:"ballId,omitempty"`
+}
+
+// ParsePartyJSON parses a save file byte array and returns the party as JSON.
+// Trainer fields are read from the save when the generation can provide them;
+// older party-only paths fall back to the first Pokémon's OT data.
 func ParsePartyJSON(saveData []byte) (string, error) {
 	saveFile, err := core.LoadSaveFromBytes(saveData)
 	if err != nil {
 		return "", err
 	}
-
 	party, err := saveFile.GetParty()
 	if err != nil {
 		return "", err
 	}
 
-	gen := saveFile.Generation()
-
-	res := PartyResponse{
-		Generation:  gen,
-		TrainerName: "UniversalTrainer",
-		TID:         0,
-		SID:         0,
-		Party:       make([]PokemonResponse, len(party)),
+	res := PartyResponse{Generation: saveFile.Generation(), Party: make([]PokemonResponse, 0, len(party))}
+	if info, ok := saveFile.(core.InfoProvider); ok {
+		game := info.Info()
+		res.Game, res.Family = game.Game, game.Family
+	}
+	if p, ok := saveFile.(core.TrainerProvider); ok {
+		if trainer, err := p.TrainerInfo(); err == nil {
+			res.TrainerName, res.TID, res.SID = trainer.Name, trainer.TID, trainer.SID
+		}
 	}
 
 	for i, p := range party {
@@ -63,6 +86,12 @@ func ParsePartyJSON(saveData []byte) (string, error) {
 			Nickname: p.GetNickname(),
 			OTName:   p.GetTrainerName(),
 			OTID:     uint16(p.GetTrainerID() & 0xFFFF),
+			HeldItem: p.GetHeldItem(),
+			Slot:     fmt.Sprintf("party:%d", i+1),
+			Checksum: p.IsChecksumValid(),
+		}
+		if n, ok := p.(interface{ NationalID() uint16 }); ok {
+			response.National = n.NationalID()
 		}
 		if ball, ok := p.(core.CaptureBall); ok {
 			if id, known := ball.GetCaptureBall(); known {
@@ -70,9 +99,17 @@ func ParsePartyJSON(saveData []byte) (string, error) {
 				response.BallID = &ballID
 			}
 		}
-		res.Party[i] = response
+		res.Party = append(res.Party, response)
 	}
 
+	// If the save cannot report a trainer, use the first record's OT identity.
+	if res.TrainerName == "" && len(party) > 0 {
+		res.TrainerName = party[0].GetTrainerName()
+		res.TID = uint16(party[0].GetTrainerID() & 0xFFFF)
+	}
+	if res.TrainerName == "" {
+		res.TrainerName = "TRAINER"
+	}
 	jsonBytes, err := json.Marshal(res)
 	if err != nil {
 		return "", err
@@ -80,123 +117,195 @@ func ParsePartyJSON(saveData []byte) (string, error) {
 	return string(jsonBytes), nil
 }
 
-// TradePreview describes whether the selected pair can be exchanged without
-// dropping or fabricating record data.
-type TradePreview struct {
-	Supported bool     `json:"supported"`
-	Lossy     bool     `json:"lossy"`
-	Message   string   `json:"message"`
-	Losses    []string `json:"losses"`
-}
-
-func PreviewTrade(saveAData []byte, saveBData []byte, idxA int, idxB int) *TradePreview {
+// PreviewTrade is the original party-index entry point. Indices are 1-based.
+func PreviewTrade(saveAData []byte, saveBData []byte, idxA int, idxB int) *core.TradePreview {
+	if idxA < 1 || idxB < 1 {
+		return &core.TradePreview{
+			Supported: false,
+			Losses:    []string{},
+			Message:   "Party slots are one-based; select a slot between 1 and 6.",
+		}
+	}
 	saveA, err := core.LoadSaveFromBytes(saveAData)
 	if err != nil {
-		return &TradePreview{Message: fmt.Sprintf("Save A could not be read: %v", err)}
+		return &core.TradePreview{Supported: false, Losses: []string{}, Message: fmt.Sprintf("Save A could not be read: %v", err)}
 	}
 	saveB, err := core.LoadSaveFromBytes(saveBData)
 	if err != nil {
-		return &TradePreview{Message: fmt.Sprintf("Save B could not be read: %v", err)}
+		return &core.TradePreview{Supported: false, Losses: []string{}, Message: fmt.Sprintf("Save B could not be read: %v", err)}
 	}
-	genA, genB := saveA.Generation(), saveB.Generation()
-	if genA != genB {
-		return &TradePreview{
-			Message: fmt.Sprintf("Cross-generation trades are not supported (Gen %d into Gen %d). Both saves must be the same generation.", genA, genB),
-		}
-	}
-	if !core.SupportsTrade(genA) {
-		return &TradePreview{
-			Message: fmt.Sprintf("Gen %d does not have a complete, verified party writer yet. No files will be changed.", genA),
-		}
-	}
+	return core.PreviewPartyTrade(saveA, saveB, idxA, idxB)
+}
 
-	partyA, err := saveA.GetParty()
+// PreviewSlotTrade accepts the shared party:N / box:B/S slot syntax.
+func PreviewSlotTrade(saveAData []byte, saveBData []byte, slotA string, slotB string) *core.TradePreview {
+	refA, err := core.ParseSlot(slotA)
 	if err != nil {
-		return &TradePreview{Message: fmt.Sprintf("Save A party could not be read: %v", err)}
+		return &core.TradePreview{Supported: false, Losses: []string{}, Message: fmt.Sprintf("Save A slot: %v", err)}
 	}
-	partyB, err := saveB.GetParty()
+	refB, err := core.ParseSlot(slotB)
 	if err != nil {
-		return &TradePreview{Message: fmt.Sprintf("Save B party could not be read: %v", err)}
+		return &core.TradePreview{Supported: false, Losses: []string{}, Message: fmt.Sprintf("Save B slot: %v", err)}
 	}
-	if idxA < 1 || idxA > len(partyA) || idxB < 1 || idxB > len(partyB) {
-		return &TradePreview{Message: "Select an existing Pokémon from both parties."}
+	saveA, err := core.LoadSaveFromBytes(saveAData)
+	if err != nil {
+		return &core.TradePreview{Supported: false, Losses: []string{}, Message: fmt.Sprintf("Save A could not be read: %v", err)}
 	}
-	for _, pokemon := range append(append([]core.Pokemon(nil), partyA...), partyB...) {
-		if !pokemon.IsChecksumValid() {
-			return &TradePreview{Message: "A party record has an invalid checksum. No files will be changed."}
-		}
+	saveB, err := core.LoadSaveFromBytes(saveBData)
+	if err != nil {
+		return &core.TradePreview{Supported: false, Losses: []string{}, Message: fmt.Sprintf("Save B could not be read: %v", err)}
 	}
-	return &TradePreview{
-		Supported: true,
-		Message:   fmt.Sprintf("Both are valid Gen %d saves. Complete party records will be exchanged byte-for-byte.", genA),
-	}
+	return core.PreviewTrade(saveA, saveB, refA, refB)
 }
 
 // PreviewTradeJSON returns the transfer preview as JSON for the Android bridge.
 func PreviewTradeJSON(saveAData []byte, saveBData []byte, idxA int, idxB int) string {
-	preview := PreviewTrade(saveAData, saveBData, idxA, idxB)
+	return marshalPreview(PreviewTrade(saveAData, saveBData, idxA, idxB))
+}
+
+// PreviewSlotTradeJSON is the slot-syntax variant for box-aware callers.
+func PreviewSlotTradeJSON(saveAData []byte, saveBData []byte, slotA string, slotB string) string {
+	return marshalPreview(PreviewSlotTrade(saveAData, saveBData, slotA, slotB))
+}
+
+func marshalPreview(preview *core.TradePreview) string {
 	encoded, err := json.Marshal(preview)
 	if err != nil {
-		return `{"supported":false,"message":"Transfer preview could not be created."}`
+		return `{"supported":false,"lossy":false,"message":"Transfer preview could not be created.","losses":[]}`
 	}
 	return string(encoded)
 }
 
 // TradeResult encapsulates the modified byte arrays to return to Android.
 type TradeResult struct {
-	SaveA []byte
-	SaveB []byte
+	SaveA      []byte
+	SaveB      []byte
+	Evolutions []core.Evolution
 }
 
-// PerformTrade executes the raw byte swap and evolution logic entirely in memory.
-// It takes 1-indexed party indices (idxA, idxB).
+// PerformTrade executes a party trade. It takes 1-indexed party indices.
 func PerformTrade(saveAData []byte, saveBData []byte, idxA int, idxB int) (*TradeResult, error) {
-	preview := PreviewTrade(saveAData, saveBData, idxA, idxB)
-	if !preview.Supported {
-		return nil, fmt.Errorf("%s", preview.Message)
+	if idxA < 1 || idxB < 1 {
+		return nil, fmt.Errorf("party slots are one-based")
 	}
-	saveAData = append([]byte(nil), saveAData...)
-	saveBData = append([]byte(nil), saveBData...)
+	return performSlotTrade(saveAData, saveBData, core.Party(idxA), core.Party(idxB))
+}
 
-	saveFileA, err := core.LoadSaveFromBytes(saveAData)
+// PerformSlotTrade executes a party or box trade using party:N / box:B/S.
+func PerformSlotTrade(saveAData []byte, saveBData []byte, slotA string, slotB string) (*TradeResult, error) {
+	refA, err := core.ParseSlot(slotA)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load Save A: %w", err)
+		return nil, err
 	}
-	saveFileB, err := core.LoadSaveFromBytes(saveBData)
+	refB, err := core.ParseSlot(slotB)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load Save B: %w", err)
+		return nil, err
 	}
-	if saveFileA.Generation() != saveFileB.Generation() {
-		return nil, fmt.Errorf("cross-generation trades are not supported")
-	}
+	return performSlotTrade(saveAData, saveBData, refA, refB)
+}
 
-	partyA, err := saveFileA.GetParty()
+func performSlotTrade(saveAData []byte, saveBData []byte, refA, refB core.SlotRef) (*TradeResult, error) {
+	// Copy both inputs so a rejected or failed trade can never mutate the
+	// caller's slices (some legacy parsers write in place).
+	a := append([]byte(nil), saveAData...)
+	b := append([]byte(nil), saveBData...)
+	saveA, err := core.LoadSaveFromBytes(a)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read Save A party: %w", err)
+		return nil, fmt.Errorf("Save A could not be read: %w", err)
 	}
-	partyB, err := saveFileB.GetParty()
+	saveB, err := core.LoadSaveFromBytes(b)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read Save B party: %w", err)
+		return nil, fmt.Errorf("Save B could not be read: %w", err)
 	}
-	if idxA < 1 || idxA > len(partyA) || idxB < 1 || idxB > len(partyB) {
-		return nil, fmt.Errorf("selected party index does not exist")
+	result, err := core.ExecuteTrade(saveA, saveB, refA, refB)
+	if err != nil {
+		return nil, err
 	}
-	for _, pokemon := range append(append([]core.Pokemon(nil), partyA...), partyB...) {
-		if !pokemon.IsChecksumValid() {
-			return nil, fmt.Errorf("trade refused because a party record has an invalid checksum")
+	return &TradeResult{SaveA: result.SaveA, SaveB: result.SaveB, Evolutions: result.Evolutions}, nil
+}
+
+// SlotsResponse describes every slot of a save: the party and, when the
+// format has them, the boxes.
+type SlotsResponse struct {
+	Generation  int                 `json:"generation"`
+	BoxCount    int                 `json:"boxCount"`
+	BoxCapacity int                 `json:"boxCapacity"`
+	Party       []PokemonResponse   `json:"party"`
+	Slots       []SlotEntryResponse `json:"slots"`
+}
+
+// ListSlotsJSON lists every occupied slot in a save, together with the party
+// and the box geometry, so a caller can offer the boxes to the player.
+func ListSlotsJSON(saveData []byte, includeEmpty bool) (string, error) {
+	save, err := core.LoadSaveFromBytes(saveData)
+	if err != nil {
+		return "", err
+	}
+	out := SlotsResponse{Generation: save.Generation(), Party: make([]PokemonResponse, 0, 6)}
+
+	party, err := save.GetParty()
+	if err != nil {
+		return "", err
+	}
+	for i, p := range party {
+		entry := PokemonResponse{
+			Index:    i + 1,
+			Species:  p.GetSpecies(),
+			Level:    p.GetLevel(),
+			Nickname: p.GetNickname(),
+			OTName:   p.GetTrainerName(),
+			OTID:     uint16(p.GetTrainerID() & 0xFFFF),
+			HeldItem: p.GetHeldItem(),
+			Slot:     fmt.Sprintf("party:%d", i+1),
+			Checksum: p.IsChecksumValid(),
 		}
+		if n, ok := p.(interface{ NationalID() uint16 }); ok {
+			entry.National = n.NationalID()
+		}
+		if ball, ok := p.(core.CaptureBall); ok {
+			if id, known := ball.GetCaptureBall(); known {
+				ballID := id
+				entry.BallID = &ballID
+			}
+		}
+		out.Party = append(out.Party, entry)
 	}
 
-	partyA[idxA-1], partyB[idxB-1] = partyB[idxB-1], partyA[idxA-1]
-	if err := saveFileA.InjectParty(partyA); err != nil {
-		return nil, fmt.Errorf("failed to update Save A party: %w", err)
+	store, ok := save.(core.Storage)
+	if !ok {
+		encoded, err := json.Marshal(out)
+		return string(encoded), err
 	}
-	if err := saveFileB.InjectParty(partyB); err != nil {
-		return nil, fmt.Errorf("failed to update Save B party: %w", err)
-	}
+	out.BoxCount = store.BoxCount()
+	out.BoxCapacity = store.BoxCapacity()
 
-	return &TradeResult{
-		SaveA: saveFileA.WriteToBytes(),
-		SaveB: saveFileB.WriteToBytes(),
-	}, nil
+	entries, err := store.ListSlots(includeEmpty)
+	if err != nil {
+		return "", err
+	}
+	out.Slots = make([]SlotEntryResponse, 0, len(entries))
+	for _, entry := range entries {
+		item := SlotEntryResponse{Slot: entry.Ref.String(), Empty: entry.Empty}
+		if entry.Pokemon != nil {
+			p := entry.Pokemon
+			item.Species = p.GetSpecies()
+			item.Level = p.GetLevel()
+			item.Nickname = p.GetNickname()
+			item.OTName = p.GetTrainerName()
+			item.OTID = uint16(p.GetTrainerID() & 0xFFFF)
+			item.HeldItem = p.GetHeldItem()
+			if n, ok := p.(interface{ NationalID() uint16 }); ok {
+				item.National = n.NationalID()
+			}
+			if ball, ok := p.(core.CaptureBall); ok {
+				if id, known := ball.GetCaptureBall(); known {
+					ballID := id
+					item.BallID = &ballID
+				}
+			}
+		}
+		out.Slots = append(out.Slots, item)
+	}
+	encoded, err := json.Marshal(out)
+	return string(encoded), err
 }

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import 'models.dart';
 import 'theme.dart';
+import 'widgets/box_picker.dart';
 import 'widgets/gba_widgets.dart';
 import 'widgets/link_strip.dart';
 import 'widgets/trade_room.dart';
@@ -25,9 +26,11 @@ class _TradeScreenState extends State<TradeScreen> {
   String? _uriB;
   SaveData? _saveA;
   SaveData? _saveB;
+  SaveSlots? _slotsA;
+  SaveSlots? _slotsB;
 
-  int? _selectedA;
-  int? _selectedB;
+  String? _selectedSlotA;
+  String? _selectedSlotB;
 
   bool _busy = false;
   bool _picking = false;
@@ -45,8 +48,13 @@ class _TradeScreenState extends State<TradeScreen> {
     super.dispose();
   }
 
-  PartyPokemon? get _pickedA => _saveA?.byIndex(_selectedA);
-  PartyPokemon? get _pickedB => _saveB?.byIndex(_selectedB);
+  PartyPokemon? get _pickedA => _pickedFor(_slotsA, _selectedSlotA);
+  PartyPokemon? get _pickedB => _pickedFor(_slotsB, _selectedSlotB);
+
+  PartyPokemon? _pickedFor(SaveSlots? slots, String? ref) {
+    if (slots == null || ref == null) return null;
+    return slots.byRef(ref)?.pokemon;
+  }
 
   bool get _ready =>
       _uriA != null &&
@@ -88,17 +96,20 @@ class _TradeScreenState extends State<TradeScreen> {
         return;
       }
       final data = SaveData.fromJson(Map<String, dynamic>.from(decoded));
+      final slots = await _loadSlots(uri);
 
       HapticFeedback.selectionClick();
       setState(() {
         if (playerOne) {
           _saveA = data;
+          _slotsA = slots;
           _uriA = uri;
-          _selectedA = null;
+          _selectedSlotA = null;
         } else {
           _saveB = data;
+          _slotsB = slots;
           _uriB = uri;
-          _selectedB = null;
+          _selectedSlotB = null;
         }
       });
 
@@ -116,14 +127,67 @@ class _TradeScreenState extends State<TradeScreen> {
     }
   }
 
+  /// Reads the party and the boxes of a save so the storage screen can offer
+  /// every Pokémon it holds.
+  Future<SaveSlots?> _loadSlots(String uri) async {
+    try {
+      final raw = await platform.invokeMethod<String>('listSlots', {
+        'uri': uri,
+        'includeEmpty': true,
+      });
+      if (raw == null) return null;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      return SaveSlots.fromJson(Map<String, dynamic>.from(decoded));
+    } on PlatformException {
+      return null;
+    } on FormatException {
+      return null;
+    }
+  }
+
   void _pickPokemon({required bool playerOne, required int index}) {
     if (_busy) return;
     HapticFeedback.selectionClick();
     setState(() {
+      final ref = 'party:$index';
       if (playerOne) {
-        _selectedA = _selectedA == index ? null : index;
+        _selectedSlotA = _selectedSlotA == ref ? null : ref;
       } else {
-        _selectedB = _selectedB == index ? null : index;
+        _selectedSlotB = _selectedSlotB == ref ? null : ref;
+      }
+    });
+  }
+
+  /// Opens the storage screen of one side so a boxed Pokémon can be picked.
+  Future<void> _openBoxes({required bool playerOne}) async {
+    if (_busy || _picking) return;
+    final uri = playerOne ? _uriA : _uriB;
+    if (uri == null) return;
+    var slots = playerOne ? _slotsA : _slotsB;
+    if (slots == null || !slots.hasBoxes) {
+      slots = await _loadSlots(uri);
+      if (slots == null) {
+        _say('This save has no boxes to open.');
+        return;
+      }
+      setState(() {
+        if (playerOne) {
+          _slotsA = slots;
+        } else {
+          _slotsB = slots;
+        }
+      });
+    }
+    if (!mounted) return;
+    final picked = await BoxPicker.show(context, slots);
+    if (picked == null || !mounted) return;
+    HapticFeedback.selectionClick();
+    setState(() {
+      if (playerOne) {
+        _selectedSlotA = picked;
+      } else {
+        _selectedSlotB = picked;
       }
     });
   }
@@ -144,11 +208,11 @@ class _TradeScreenState extends State<TradeScreen> {
     final b = _pickedB!;
     setState(() => _openingPreview = true);
     try {
-      final raw = await platform.invokeMethod<String>('previewTrade', {
+      final raw = await platform.invokeMethod<String>('previewSlotTrade', {
         'uriA': _uriA,
         'uriB': _uriB,
-        'idxA': a.index,
-        'idxB': b.index,
+        'slotA': _selectedSlotA,
+        'slotB': _selectedSlotB,
       });
       if (!mounted || raw == null) return;
       final decoded = jsonDecode(raw);
@@ -191,11 +255,11 @@ class _TradeScreenState extends State<TradeScreen> {
 
     setState(() => _busy = true);
     try {
-      final ok = await platform.invokeMethod('performTrade', {
+      final ok = await platform.invokeMethod('performSlotTrade', {
         'uriA': _uriA,
         'uriB': _uriB,
-        'idxA': a.index,
-        'idxB': b.index,
+        'slotA': _selectedSlotA,
+        'slotB': _selectedSlotB,
       });
       if (!mounted) return;
       setState(() {
@@ -227,10 +291,12 @@ class _TradeScreenState extends State<TradeScreen> {
         // The files on disk were rewritten in place, so the previews are stale.
         _saveA = null;
         _saveB = null;
+        _slotsA = null;
+        _slotsB = null;
         _uriA = null;
         _uriB = null;
-        _selectedA = null;
-        _selectedB = null;
+        _selectedSlotA = null;
+        _selectedSlotB = null;
       }
     });
     if (succeeded) {
@@ -291,10 +357,11 @@ class _TradeScreenState extends State<TradeScreen> {
             child: TrainerWindow(
               playerOne: true,
               data: _saveA,
-              selectedIndex: _selectedA,
+              selectedSlot: _selectedSlotA,
               interactive: !_busy && !_picking,
               onSelect: (i) => _pickPokemon(playerOne: true, index: i),
               onPickFile: () => _pickFile(playerOne: true),
+              onOpenBoxes: () => _openBoxes(playerOne: true),
             ),
           ),
           Padding(
@@ -305,10 +372,11 @@ class _TradeScreenState extends State<TradeScreen> {
             child: TrainerWindow(
               playerOne: false,
               data: _saveB,
-              selectedIndex: _selectedB,
+              selectedSlot: _selectedSlotB,
               interactive: !_busy && !_picking,
               onSelect: (i) => _pickPokemon(playerOne: false, index: i),
               onPickFile: () => _pickFile(playerOne: false),
+              onOpenBoxes: () => _openBoxes(playerOne: false),
             ),
           ),
           const SizedBox(height: 8),
@@ -369,7 +437,7 @@ class _TransferPreviewDialog extends StatelessWidget {
             Text('TRANSFER CHECK', style: GbaText.name),
             const SizedBox(height: 8),
             Text(
-              'PLAYER 1: ${playerOne.speciesName}  →  GEN $targetGeneration\\n'
+              'PLAYER 1: ${playerOne.speciesName}  →  GEN $targetGeneration\n'
               'PLAYER 2: ${playerTwo.speciesName}  →  GEN $sourceGeneration',
               style: GbaText.label.copyWith(color: Gba.ink),
             ),

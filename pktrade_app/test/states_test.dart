@@ -27,10 +27,46 @@ Future<void> _loadFonts() async {
   await loader.load();
 }
 
+/// Builds the slot listing the engine would return for a save: the party
+/// plus one box with a single occupant.
+Map<String, dynamic> slotsPayload(String? partyJson) {
+  final decoded = partyJson == null
+      ? <String, dynamic>{}
+      : Map<String, dynamic>.from(jsonDecode(partyJson) as Map);
+  final party = (decoded['party'] as List?) ?? const [];
+  final slots = <Map<String, dynamic>>[];
+  for (final entry in party) {
+    final slot = Map<String, dynamic>.from(entry as Map);
+    slot['slot'] = 'party:${slot['index']}';
+    slot['empty'] = false;
+    slots.add(slot);
+  }
+  slots.add({
+    'slot': 'box:1/1',
+    'empty': false,
+    'index': 1,
+    'species': 25,
+    'level': 12,
+    'nickname': 'PIKACHU',
+    'otName': 'AAAAA',
+    'otId': 33403,
+    'ballId': 4,
+  });
+  slots.add({'slot': 'box:1/2', 'empty': true});
+  return {
+    'generation': decoded['generation'] ?? 3,
+    'boxCount': 14,
+    'boxCapacity': 30,
+    'party': party,
+    'slots': slots,
+  };
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late List<String> pending;
+  late Map<String, String> selected;
   late Object tradeResult; // true, false, or 'throw'
   late int tradeCalls;
   late bool previewSupported;
@@ -38,6 +74,7 @@ void main() {
 
   setUp(() {
     pending = [_saveA, _saveB];
+    selected = {};
     tradeResult = true;
     tradeCalls = 0;
     previewSupported = true;
@@ -46,13 +83,16 @@ void main() {
         .setMockMethodCallHandler(_channel, (call) async {
           switch (call.method) {
             case 'selectSave':
-              return pending.isEmpty
-                  ? null
-                  : {
-                      'uri': 'content://s/${pending.length}',
-                      'json': pending.removeAt(0),
-                    };
+              if (pending.isEmpty) return null;
+              final uri = 'content://s/${pending.length}';
+              final json = pending.removeAt(0);
+              selected[uri] = json;
+              return {'uri': uri, 'json': json};
+            case 'listSlots':
+              final uri = (call.arguments as Map)['uri'] as String;
+              return jsonEncode(slotsPayload(selected[uri]));
             case 'previewTrade':
+            case 'previewSlotTrade':
               return jsonEncode({
                 'supported': previewSupported,
                 'lossy': previewLosses.isNotEmpty,
@@ -62,6 +102,7 @@ void main() {
                 'losses': previewLosses,
               });
             case 'performTrade':
+            case 'performSlotTrade':
               tradeCalls++;
               if (tradeResult == 'throw') {
                 throw PlatformException(
@@ -293,6 +334,74 @@ void main() {
             ),
       ),
       findsNothing,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a boxed Pokémon can be picked from the storage screen', (
+    tester,
+  ) async {
+    await _loadFonts();
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(const MaterialApp(home: TradeScreen()));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.tap(find.text('INSERT SAVE').first, warnIfMissed: false);
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('INSERT SAVE').first, warnIfMissed: false);
+    await tester.pump(const Duration(milliseconds: 600));
+
+    await tester.tap(find.text('BOXES').first, warnIfMissed: false);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('025 PIKACHU'), findsOneWidget);
+
+    await tester.tap(find.text('025 PIKACHU'), warnIfMissed: false);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('025 PIKACHU'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a ball from a later generation renders its own sprite', (
+    tester,
+  ) async {
+    pending = [
+      _saveA.replaceAll('"ballId":1,', '"ballId":16,'),
+      _saveB.replaceAll('"ballId":12,', ''),
+    ];
+    await _loadFonts();
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(const MaterialApp(home: TradeScreen()));
+    await tester.pump(const Duration(milliseconds: 500));
+
+    await tester.tap(find.text('INSERT SAVE').first, warnIfMissed: false);
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('INSERT SAVE').first, warnIfMissed: false);
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.tap(find.text('KADABRA').first, warnIfMissed: false);
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.tap(find.text('MACHOKE').first, warnIfMissed: false);
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('TRADE'), warnIfMissed: false);
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.text('CONTINUE'), warnIfMissed: false);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1200));
+    await tester.pump();
+    await tester.tap(find.text('YES'), warnIfMissed: false);
+    await tester.pump();
+
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Image &&
+            widget.image ==
+                const AssetImage('assets/images/balls/cherish-ball.png'),
+      ),
+      findsOneWidget,
     );
     expect(tester.takeException(), isNull);
   });

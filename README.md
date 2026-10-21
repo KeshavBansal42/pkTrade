@@ -1,0 +1,171 @@
+# pkTrade
+
+pkTrade trades Pokémon between two save files. Trades are **same generation
+only**: two saves may only exchange Pokémon when they use the same generation
+*and* the same save format family. FireRed and LeafGreen are different
+formats, so are Ruby/Sapphire and Emerald, and so are Diamond/Pearl and
+HeartGold/SoulSilver. A trade between incompatible saves is refused before
+anything is written.
+
+Every supported generation can trade in the party **and** in the boxes.
+
+## Supported generations
+
+| Generation | Games | Party | Boxes | Trade evolutions | Pokédex write |
+|---|---|---|---|---|---|
+| 1 | Red / Blue / Yellow | yes | 12 boxes × 20 | yes | yes |
+| 2 | Gold / Silver / Crystal | yes | 14 boxes × 20 | yes (item evolutions) | yes |
+| 3 | FireRed / LeafGreen | yes | 14 boxes × 30 | yes (item evolutions) | yes |
+| 4 | Diamond / Pearl, Platinum, HeartGold / SoulSilver | yes | 18 boxes × 30 | yes (item evolutions) | yes |
+| 5 | Black / White, Black 2 / White 2 | yes | 24 boxes × 30 | yes (item evolutions) | yes |
+| 6 | X / Y, Omega Ruby / Alpha Sapphire | yes | 31 boxes × 30 | yes (item evolutions) | yes |
+| 7 | Sun / Moon, Ultra Sun / Ultra Moon | yes | 32 boxes × 30 | yes (item evolutions) | yes |
+| 8 | Sword / Shield | yes | 32 boxes × 30 | yes (item evolutions) | no |
+
+Notes:
+
+* Gen 3 accepts FireRed and LeafGreen saves only. The engine validates the
+  save size, both save slots, and the section checksums before it will read or
+  write anything.
+* The engine has been run against real FireRed, X/Y and Black/White saves: the
+  party, the boxes, the trainer record, a party trade, a box trade and the
+  Pokédex write all round-trip on those files. The other generations are
+  covered by synthetic saves built from an independent implementation of each
+  format.
+* Gen 4 and Gen 5 both use 512 KiB save files. The formats are told apart by
+  their own block checksums, so a Black/White save is never mistaken for a
+  Diamond/Pearl save.
+* Gen 4 and Gen 5 records use different item ids for the same item. The
+  evolution tables are per generation, so a King's Rock in Gen 4 and a King's
+  Rock in Gen 6 are both understood.
+* Every generation numbers its items on its own list: a King's Rock is item 82
+  in Gen 2, 187 in Gen 3 and 221 from Gen 4 on. The tables are per generation so
+  a mixed-up number cannot silently disable an evolution.
+* The Pokédex is written for Gen 1 to Gen 7. Gen 8 keeps its dex as one record
+  per species with its own index table, and that table is not reproduced here,
+  so a Sword/Shield dex is left untouched instead of being written with a
+  guessed offset.
+* Eggs, records with a broken checksum and empty slots are refused.
+
+## Trade evolutions
+
+An evolution is applied when the received Pokémon is traded, and the item it
+needs is consumed. The itemless evolutions are Kadabra, Machoke, Graveler,
+Haunter and (from Gen 2 on) Hitmonlee; Gen 4 adds Nosepass and the item
+evolutions, Gen 5 adds Boldore and Gurdurr, Gen 6 adds Phantump, Pumpkaboo,
+Spritzee and Swirlix.
+
+| Evolution | Item | Generations |
+|---|---|---|
+| Poliwhirl → Politoed | King's Rock | 2+ |
+| Slowpoke → Slowking | King's Rock | 2+ |
+| Onix → Steelix | Metal Coat | 2+ |
+| Scyther → Scizor | Metal Coat | 2+ |
+| Seadra → Kingdra | Dragon Scale | 2+ |
+| Porygon → Porygon2 | Up-Grade | 2+ |
+| Clamperl → Huntail / Gorebyss | Deep Sea Tooth / Deep Sea Scale | 3+ |
+| Porygon2 → Porygon-Z | Dubious Disc | 4+ |
+| Dusclops → Dusknoir | Reaper Cloth | 4+ |
+| Rhydon → Rhyperior | Protector | 4+ |
+| Electabuzz → Electivire | Electirizer | 4+ |
+| Magmar → Magmortar | Magmarizer | 4+ |
+| Feebas → Milotic | Prism Scale | 5+ |
+| Spritzee → Aromatisse | Sachet | 6+ |
+| Swirlix → Slurpuff | Whipped Dream | 6+ |
+
+One evolution is not implemented: Karrablast and Shelmet evolve into each
+other when they are traded for one another, which needs both Pokémon at once.
+The engine's evolution hook only sees the incoming record, so this one case is
+left alone.
+
+## Slot syntax
+
+Every command and every API call uses the same slot syntax:
+
+```
+party:3      party slot 3 (1-6)
+box:2/11     box 2, slot 11 (1-based)
+```
+
+## Command line
+
+```
+pktrade list <save> [<save> ...]
+pktrade preview <saveA> <saveB> <slotA> <slotB>
+pktrade trade <saveA> <saveB> <slotA> <slotB> [--yes]
+```
+
+`list` prints the save's generation, game, trainer, supported features and
+every occupied slot. `preview` explains whether a trade is possible without
+touching a file. `trade` writes the result to `./out`, never to the input
+files, and takes a verified backup of each input first.
+
+```bash
+go run ./cmd/pktrade list "firered.sav" "leafgreen.sav"
+go run ./cmd/pktrade preview "firered.sav" "leafgreen.sav" party:1 box:3/12
+go run ./cmd/pktrade trade "firered.sav" "leafgreen.sav" box:1/1 box:1/1 --yes
+```
+
+## Mobile API
+
+The `mobile` package is bound to Flutter with gomobile. The Flutter app talks
+to it over the `com.pktrade/bridge` method channel.
+
+| Function | Purpose |
+|---|---|
+| `ParsePartyJSON(bytes)` | Party of a save as JSON, including the real trainer record |
+| `ListSlotsJSON(bytes, includeEmpty)` | Party and boxes of a save as JSON, with the box geometry |
+| `PreviewTradeJSON(a, b, i, j)` | Preview of a party trade (the original entry point) |
+| `PreviewSlotTradeJSON(a, b, slotA, slotB)` | Preview of a party or box trade |
+| `PerformTrade(a, b, i, j)` | Party trade, returns both rewritten saves |
+| `PerformSlotTrade(a, b, slotA, slotB)` | Party or box trade, returns both rewritten saves |
+
+The JSON contract never changed: `supported`, `lossy`, `message` and `losses`
+keep their lower-camel-case names, `lossy` is always `false` and `losses` is
+always empty. `supported` is the only field a caller may use to decide whether
+a trade is safe.
+
+The app reaches the boxes through `ListSlotsJSON`: the storage screen lists
+every box of a save, and the slot reference of the chosen Pokémon (`party:3`,
+`box:2/11`) is what the preview and the trade use.
+
+## Ball sprites
+
+The capture ball of a traded Pokémon is read out of the record: the ball byte
+of the original-trainer block in Gen 4 to Gen 8, and the origins block in Gen 3.
+Gen 1 and Gen 2 have no capture ball in the save, so those trades show the
+unknown marker.
+
+The item numbers differ per generation, and the sprite table follows the
+numbers the games use: the twelve classic balls are 1 to 12 in every
+generation, Dusk, Heal, Quick and Cherish Ball are 13 to 16 from Gen 4 on, the
+apricorn balls are 492 to 500, the Dream Ball is 576 and the Beast Ball is 851.
+
+The ball artwork in `pktrade_app/assets/images/balls` is the official Pokémon
+item art, cropped to the 18 by 18 pixel icon the app draws.
+
+## Building the Android library
+
+The Flutter app loads the Go engine from `pktrade_app/android/app/libs/mobile.aar`.
+That file is a build artifact and is not stored in the repository, so build it
+before assembling the app:
+
+```bash
+make aar          # gomobile bind -> pktrade_app/android/app/libs/mobile.aar
+make apk          # debug APK
+```
+
+`make aar` needs the Android SDK and NDK; point `ANDROID_HOME` at the SDK
+directory if it is not already set.
+
+## Tests
+
+```bash
+make test         # go test ./...
+make check        # go vet, go test, flutter analyze, flutter test
+```
+
+The Go tests use synthetic save files that were generated with an independent
+implementation of each save format, so the engine is checked against the
+format and not only against itself. The fixtures live in the `testdata`
+directory of each generation package.

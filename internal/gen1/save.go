@@ -46,8 +46,42 @@ func init() {
 		if data[checksumOffset] != mainChecksum(data) {
 			return nil, fmt.Errorf("gen 1 checksum mismatch")
 		}
-		return &SaveFile{data: data}, nil
+		// Gen 2 saves are also 32 KiB and can coincidentally satisfy the
+		// Gen 1 sum. A real Gen 1 save has at most six party members and a
+		// terminator after the species list.
+		if data[partyCountOffset] > 6 {
+			return nil, fmt.Errorf("not a gen 1 save (party count %d)", data[partyCountOffset])
+		}
+		if data[partySpeciesBase+int(data[partyCountOffset])] != 0xFF {
+			return nil, fmt.Errorf("not a gen 1 save (missing party terminator)")
+		}
+		// The copy of the current box that the game keeps at 0x30C0 must be a
+		// well-formed list as well. This is what separates a Generation I save
+		// from a Generation II save of the same size.
+		if !validPackedList(data, currentBox, BoxCapacity) {
+			return nil, fmt.Errorf("not a gen 1 save (current box list is malformed)")
+		}
+		return &SaveFile{data: copyBytes(data)}, nil
 	})
+}
+
+func copyBytes(data []byte) []byte {
+	out := make([]byte, len(data))
+	copy(out, data)
+	return out
+}
+
+// validPackedList reports whether the byte range holds a well-formed packed
+// list: a count byte followed by a species array that is terminated by 0xFF.
+func validPackedList(data []byte, offset, maxCount int) bool {
+	if offset < 0 || offset+1 >= len(data) {
+		return false
+	}
+	count := int(data[offset])
+	if count > maxCount {
+		return false
+	}
+	return data[offset+1+count] == 0xFF
 }
 
 func mainChecksum(data []byte) byte {
@@ -129,11 +163,31 @@ func (s *SaveFile) InjectParty(party []core.Pokemon) error {
 }
 
 func (s *SaveFile) WriteToFile(path string) error {
-	s.data[checksumOffset] = mainChecksum(s.data)
-	return os.WriteFile(path, s.data, 0644)
+	return os.WriteFile(path, s.WriteToBytes(), 0644)
 }
 
 func (s *SaveFile) WriteToBytes() []byte {
-	s.data[checksumOffset] = mainChecksum(s.data)
-	return s.data
+	out := copyBytes(s.data)
+	out[checksumOffset] = mainChecksum(out)
+	return out
+}
+
+func (s *SaveFile) Info() core.GameInfo {
+	return core.GameInfo{Generation: 1, Family: "rby", Game: "Red/Blue/Yellow"}
+}
+
+func (s *SaveFile) CompatibilityKey() core.CompatibilityKey {
+	return core.CompatibilityKey{Generation: 1, Family: "rby", Format: 1}
+}
+
+func (s *SaveFile) Capabilities() core.Capabilities {
+	return core.Capabilities{Party: true, Boxes: true, Evolution: true, Dex: true}
+}
+
+func (s *SaveFile) TrainerInfo() (core.TrainerInfo, error) {
+	info := GetTrainerInfo(s.data)
+	if info == nil {
+		return core.TrainerInfo{}, fmt.Errorf("gen 1 trainer data is unavailable")
+	}
+	return core.TrainerInfo{Name: info.Name, TID: info.TID}, nil
 }

@@ -14,18 +14,20 @@ class TrainerWindow extends StatelessWidget {
     super.key,
     required this.playerOne,
     required this.data,
-    required this.selectedIndex,
+    required this.selectedSlot,
     required this.interactive,
     required this.onSelect,
     required this.onPickFile,
+    this.onOpenBoxes,
   });
 
   final bool playerOne;
   final SaveData? data;
-  final int? selectedIndex;
+  final String? selectedSlot;
   final bool interactive;
   final ValueChanged<int> onSelect;
   final VoidCallback onPickFile;
+  final VoidCallback? onOpenBoxes;
 
   Color get _lane => playerOne ? Gba.crimson : Gba.leaf;
   String get _playerTag => playerOne ? 'P1' : 'P2';
@@ -105,7 +107,7 @@ class TrainerWindow extends StatelessWidget {
           key: ValueKey('${data.trainerId}-${p.index}'),
           pokemon: p,
           lane: _lane,
-          selected: selectedIndex == p.index,
+          selected: selectedSlot != null && selectedSlot == p.slot,
           enabled: interactive,
           onTap: () => onSelect(p.index),
         );
@@ -120,8 +122,45 @@ class TrainerWindow extends StatelessWidget {
         children: [
           Text('ID ${data.trainerIdLabel}', style: GbaText.tiny),
           const Spacer(),
+          if (onOpenBoxes != null)
+            _BoxesAction(enabled: interactive, onTap: onOpenBoxes!),
           _ChangeAction(enabled: interactive, onTap: onPickFile),
         ],
+      ),
+    );
+  }
+}
+
+/// Opens the storage screen so a Pokémon can be taken out of a box.
+class _BoxesAction extends StatelessWidget {
+  const _BoxesAction({required this.enabled, required this.onTap});
+
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: 'Open the boxes of this save',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: enabled ? onTap : null,
+          borderRadius: BorderRadius.circular(2),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+            child: Text(
+              'BOXES',
+              style: GbaText.tiny.copyWith(
+                color: enabled ? Gba.ink : Gba.inkFaint,
+                decoration: TextDecoration.underline,
+                decorationColor: enabled ? Gba.ink : Gba.inkFaint,
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

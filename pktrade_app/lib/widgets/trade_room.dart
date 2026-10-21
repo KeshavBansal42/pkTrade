@@ -50,8 +50,7 @@ class _TradeRoomState extends State<TradeRoom>
   bool _promptTyped = false;
   bool _dismissed = false;
 
-  static const _homeTop = 0.25;
-  static const _homeBottom = 0.75;
+  // The ball fills its box, so its size is derived from the available space.
 
   @override
   void didUpdateWidget(covariant TradeRoom old) {
@@ -133,10 +132,6 @@ class _TradeRoomState extends State<TradeRoom>
 
         final crossU = _progress(t, 0.08, 0.62);
         final ease = Curves.easeInOut.transform(crossU);
-        final topFx = crossing ? _lerp(_homeTop, _homeBottom, ease) : _homeTop;
-        final bottomFx = crossing
-            ? _lerp(_homeBottom, _homeTop, ease)
-            : _homeBottom;
         final arc = math.sin(math.pi * crossU);
 
         final ready = crossing
@@ -152,46 +147,63 @@ class _TradeRoomState extends State<TradeRoom>
         return Stack(
           children: [
             Positioned.fill(
-              bottom: 170,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: _skip,
-                child: Stack(
-                  clipBehavior: Clip.hardEdge,
-                  children: [
-                    if (dim > 0)
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          child: ColoredBox(
-                            color: Gba.ink.withValues(alpha: dim),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    // Each trainer owns half the field; the balls rest in the
+                    // exact centre of their own half and cross to the other.
+                    final half = constraints.maxHeight / 2;
+                    // Fill the box: as large as the narrower of the half-height
+                    // and the field width, with a little room for the landing
+                    // scale-up.
+                    final ballSize = math.min(constraints.maxWidth, half) * 0.45;
+                    final topHome = half * 0.5;
+                    final bottomHome = half * 1.5;
+                    final topCenter = crossing
+                        ? _lerp(topHome, bottomHome, ease)
+                        : topHome;
+                    final bottomCenter = crossing
+                        ? _lerp(bottomHome, topHome, ease)
+                        : bottomHome;
+
+                    return Stack(
+                      clipBehavior: Clip.hardEdge,
+                      children: [
+                        if (dim > 0)
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: ColoredBox(
+                                color: Gba.ink.withValues(alpha: dim),
+                              ),
+                            ),
                           ),
+                        _ballSlot(
+                          centerY: topCenter - arc * 22,
+                          scale: ready * land,
+                          size: ballSize,
+                          player: 'Player 1',
+                          ballId: widget.fromPlayerOne.ballId,
                         ),
-                      ),
-                    _ball(
-                      alignmentY: topFx,
-                      lift: -arc * 22,
-                      scale: ready * land,
-                      lane: Gba.crimson,
-                      player: 'Player 1',
-                      ballId: widget.fromPlayerOne.ballId,
-                    ),
-                    _ball(
-                      alignmentY: bottomFx,
-                      lift: arc * 22,
-                      scale: ready * land,
-                      lane: Gba.leaf,
-                      player: 'Player 2',
-                      ballId: widget.fromPlayerTwo.ballId,
-                    ),
-                    if (flash > 0)
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          child: ColoredBox(
-                            color: Colors.white.withValues(alpha: flash),
+                        _ballSlot(
+                          centerY: bottomCenter + arc * 22,
+                          scale: ready * land,
+                          size: ballSize,
+                          player: 'Player 2',
+                          ballId: widget.fromPlayerTwo.ballId,
+                        ),
+                        if (flash > 0)
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: ColoredBox(
+                                color: Colors.white.withValues(alpha: flash),
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
-                  ],
+                      ],
+                    );
+                  },
                 ),
               ),
             ),
@@ -215,19 +227,19 @@ class _TradeRoomState extends State<TradeRoom>
     );
   }
 
-  Widget _ball({
-    required double alignmentY,
-    required double lift,
+  Widget _ballSlot({
+    required double centerY,
     required double scale,
-    required Color lane,
+    required double size,
     required String player,
     required int? ballId,
   }) {
     final asset = ballSpriteAsset(ballId);
-    return Align(
-      alignment: Alignment(0, alignmentY * 2 - 1),
-      child: Transform.translate(
-        offset: Offset(0, lift),
+    return Positioned(
+      top: centerY - size / 2,
+      left: 0,
+      right: 0,
+      child: Center(
         child: Transform.scale(
           scale: scale,
           child: Semantics(
@@ -235,24 +247,26 @@ class _TradeRoomState extends State<TradeRoom>
             label: ballId == null
                 ? '$player trade marker, ball type unknown'
                 : '$player ${ballName(ballId)}',
-            child: Container(
-              width: 120,
-              height: 120,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: Gba.window,
-                shape: BoxShape.circle,
-                border: Border.all(color: lane, width: 5),
+            child: SizedBox(
+              width: size,
+              height: size,
+              child: Center(
+                child: asset == null
+                    ? _UnknownBallMark(
+                        size: size,
+                        label: ballId == null
+                            ? 'UNKNOWN'
+                            : ballName(ballId),
+                      )
+                    : Image(
+                        image: AssetImage(asset),
+                        width: size,
+                        height: size,
+                        fit: BoxFit.contain,
+                        filterQuality: FilterQuality.none,
+                        excludeFromSemantics: true,
+                      ),
               ),
-              child: asset == null
-                  ? const _UnknownBallMark()
-                  : Image(
-                      image: AssetImage(asset),
-                      width: 96,
-                      height: 96,
-                      filterQuality: FilterQuality.none,
-                      excludeFromSemantics: true,
-                    ),
             ),
           ),
         ),
@@ -366,6 +380,21 @@ String? ballSpriteAsset(int? id) {
     10: 'timer-ball',
     11: 'luxury-ball',
     12: 'premier-ball',
+    13: 'dusk-ball',
+    14: 'heal-ball',
+    15: 'quick-ball',
+    16: 'cherish-ball',
+    492: 'fast-ball',
+    493: 'level-ball',
+    494: 'lure-ball',
+    495: 'heavy-ball',
+    496: 'love-ball',
+    497: 'friend-ball',
+    498: 'moon-ball',
+    499: 'sport-ball',
+    500: 'park-ball',
+    576: 'dream-ball',
+    851: 'beast-ball',
   };
   final name = id == null ? null : names[id];
   return name == null ? null : 'assets/images/balls/$name.png';
@@ -385,20 +414,42 @@ String ballName(int id) {
     10: 'TIMER BALL',
     11: 'LUXURY BALL',
     12: 'PREMIER BALL',
+    13: 'DUSK BALL',
+    14: 'HEAL BALL',
+    15: 'QUICK BALL',
+    16: 'CHERISH BALL',
+    492: 'FAST BALL',
+    493: 'LEVEL BALL',
+    494: 'LURE BALL',
+    495: 'HEAVY BALL',
+    496: 'LOVE BALL',
+    497: 'FRIEND BALL',
+    498: 'MOON BALL',
+    499: 'SPORT BALL',
+    500: 'PARK BALL',
+    576: 'DREAM BALL',
+    851: 'BEAST BALL',
   };
   return names[id] ?? 'UNKNOWN BALL';
 }
 
+/// Whether the ball has artwork of its own. Only the twelve classic balls
+/// were drawn, so the rarer balls fall back to a marker with their name.
+bool hasBallSprite(int? id) => ballSpriteAsset(id) != null;
+
 class _UnknownBallMark extends StatelessWidget {
-  const _UnknownBallMark();
+  const _UnknownBallMark({required this.size, this.label = 'UNKNOWN'});
+
+  final double size;
+  final String label;
 
   @override
   Widget build(BuildContext context) => Column(
     mainAxisSize: MainAxisSize.min,
     children: [
-      const CartridgeGlyph(color: Gba.inkSoft, size: 32),
-      const SizedBox(height: 5),
-      Text('UNKNOWN', style: GbaText.tiny),
+      CartridgeGlyph(color: Gba.inkSoft, size: size * 0.4),
+      const SizedBox(height: 6),
+      Text(label, style: GbaText.label),
     ],
   );
 }

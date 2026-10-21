@@ -53,6 +53,11 @@ func gen2GSave(records [][]byte, otNames, nicks [][]byte) []byte {
 	copy(data[f.partyOffset:], block)
 	copy(data[f.partyOffset+f.secondaryDelta:], block)
 
+	// The copy of the current box has to be a well-formed packed list for the
+	// save to be recognised as a Generation II save.
+	data[f.currentBox] = 0
+	data[f.currentBox+1] = 0xFF
+
 	binary.LittleEndian.PutUint16(data[f.primaryChecksum:], sum16(data, f.primaryStart, f.primaryEnd))
 	var secondary uint16
 	for _, r := range f.secondaryRanges {

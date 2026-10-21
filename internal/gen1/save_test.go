@@ -44,6 +44,10 @@ func gen1Save(records [][]byte, otNames, nicks [][]byte) []byte {
 		copy(data[partyNickNameBase+i*NameLength:], nicks[i])
 	}
 	data[partySpeciesBase+len(records)] = 0xFF
+	// The game keeps a copy of the current box list at 0x30C0; it has to be
+	// a well-formed list for the save to be recognised.
+	data[currentBox] = 0
+	data[currentBox+1] = 0xFF
 	data[checksumOffset] = mainChecksum(data)
 	return data
 }

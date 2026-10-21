@@ -12,6 +12,9 @@ func makeSaveWithParty(records ...[]byte) []byte {
 	for slotIndex, slotOffset := range []int{SlotAOffset, SlotBOffset} {
 		for physicalIndex := 0; physicalIndex < SectionsPerSlot; physicalIndex++ {
 			section := make([]byte, SectionSize)
+			if physicalIndex == 0 {
+				binary.LittleEndian.PutUint32(section[0xAC:], 1)
+			}
 			binary.LittleEndian.PutUint16(section[0xFF4:], uint16(physicalIndex))
 			binary.LittleEndian.PutUint32(section[0xFF8:], Signature)
 			binary.LittleEndian.PutUint32(section[0xFFC:], uint32(1-slotIndex))
