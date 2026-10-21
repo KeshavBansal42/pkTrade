@@ -363,9 +363,45 @@ class DexPlate extends StatelessWidget {
         border: Border.all(color: onDark ? Gba.onColor : Gba.ink, width: 1),
         borderRadius: BorderRadius.circular(2),
       ),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(
+          label,
+          maxLines: 1,
+          softWrap: false,
+          style: GbaText.number.copyWith(color: onDark ? Gba.onColor : Gba.ink),
+        ),
+      ),
+    );
+  }
+}
+
+/// A small pill that names where a record sits, the way the game labels a
+/// box slot in the margin.
+class SlotTag extends StatelessWidget {
+  const SlotTag({super.key, required this.label, this.color = Gba.inkSoft, this.filled = false});
+
+  final String label;
+  final Color color;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    if (label.isEmpty) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      decoration: BoxDecoration(
+        color: filled ? color : Colors.transparent,
+        border: Border.all(color: color, width: 1),
+        borderRadius: BorderRadius.circular(2),
+      ),
       child: Text(
         label,
-        style: GbaText.number.copyWith(color: onDark ? Gba.onColor : Gba.ink),
+        style: GbaText.tiny.copyWith(
+          color: filled ? Gba.onColor : color,
+          fontSize: 8,
+          height: 1.4,
+        ),
       ),
     );
   }

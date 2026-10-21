@@ -11,7 +11,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pktrade_app/trade_screen.dart';
-import 'package:pktrade_app/widgets/box_picker.dart';
+import 'package:pktrade_app/widgets/storage_screen.dart';
+import 'package:pktrade_app/widgets/transfer_preview_dialog.dart';
 
 const _channel = MethodChannel('com.pktrade/bridge');
 
@@ -127,6 +128,21 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: TradeScreen()));
     await tester.pump(const Duration(milliseconds: 900));
     expect(tester.takeException(), isNull);
+
+    // The ball sprites decode outside the test's fake clock, so warm the
+    // image cache before the captures.
+    await tester.runAsync(() async {
+      for (final name in const [
+        'assets/images/balls/master-ball.png',
+        'assets/images/balls/premier-ball.png',
+        'assets/images/balls/poke-ball.png',
+      ]) {
+        await precacheImage(
+          AssetImage(name),
+          tester.element(find.byType(TradeScreen)),
+        );
+      }
+    });
     await expectLater(
       find.byType(TradeScreen),
       matchesGoldenFile('goldens/01_empty.png'),
@@ -159,13 +175,34 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pump();
+    // Give the ball sprites a frame to decode before the capture.
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump();
     expect(tester.takeException(), isNull);
     await expectLater(
-      find.byType(BoxPicker),
+      find.byType(StorageScreen),
       matchesGoldenFile('goldens/07_boxes.png'),
     );
     await tester.tap(find.text('CLOSE'), warnIfMissed: false);
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+
+    // The transfer check the player sees before anything is written.
+    await tester.tap(find.text('TRADE'), warnIfMissed: false);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(tester.takeException(), isNull);
+    await expectLater(
+      find.byType(TransferPreviewDialog),
+      matchesGoldenFile('goldens/08_preview.png'),
+    );
+    // Back out of the check; the flow below opens it again.
+    await tester.tap(find.text('CANCEL'), warnIfMissed: false);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
     // Open the trade room and let the prompt type itself out.
     await tester.tap(find.text('TRADE'), warnIfMissed: false);

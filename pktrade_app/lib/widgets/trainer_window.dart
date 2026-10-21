@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models.dart';
 import '../theme.dart';
+import 'ball_art.dart';
 import 'gba_widgets.dart';
 
 /// One trainer's side of the link: a titled window holding their party.
@@ -226,6 +227,8 @@ class _MonRow extends StatelessWidget {
                         : null,
                   ),
                   const SizedBox(width: 5),
+                  BallBadge(ballId: pokemon.ballId, size: 18),
+                  const SizedBox(width: 6),
                   DexPlate(label: pokemon.dexLabel, onDark: selected, size: 30),
                   const SizedBox(width: 9),
                   Expanded(
@@ -253,6 +256,13 @@ class _MonRow extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 6),
+                  if (selected) ...[
+                    SlotTag(
+                      label: pokemon.slotLabel,
+                      color: Gba.onColor.withValues(alpha: 0.85),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
                   Text(
                     'LV${pokemon.level}',
                     style: GbaText.number.copyWith(color: onBar),

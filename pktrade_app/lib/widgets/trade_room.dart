@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../models.dart';
 import '../theme.dart';
+import 'ball_art.dart';
 import 'gba_widgets.dart';
 
 enum TradeOutcome { pending, success, failure }
@@ -139,7 +140,7 @@ class _TradeRoomState extends State<TradeRoom>
             : 1.0;
         final landU = crossing ? _progress(t, 0.66, 0.84) : 0.0;
         final land = crossing ? 1 + 0.12 * math.sin(math.pi * landU) : 1.0;
-        final flash = crossing && !failed ? _pulse(t, 0.54, 0.68) * 0.8 : 0.0;
+        final flash = crossing && !failed ? _pulse(t, 0.54, 0.68) * 0.45 : 0.0;
         final dim = _phase == _Phase.swapping
             ? _lerp(0, 0.46, _progress(t, 0.0, 0.16))
             : 0.0;
@@ -155,10 +156,14 @@ class _TradeRoomState extends State<TradeRoom>
                     // Each trainer owns half the field; the balls rest in the
                     // exact centre of their own half and cross to the other.
                     final half = constraints.maxHeight / 2;
-                    // Fill the box: as large as the narrower of the half-height
-                    // and the field width, with a little room for the landing
-                    // scale-up.
-                    final ballSize = math.min(constraints.maxWidth, half) * 0.45;
+                    // At rest the balls are small, so the table behind them
+                    // stays readable; they swell while the trade runs and
+                    // settle back once it is over.
+                    final resting = math.min(constraints.maxWidth, half) * 0.17;
+                    final active = math.min(constraints.maxWidth, half) * 0.34;
+                    final swell =
+                        _progress(t, 0.0, 0.22) * (1 - _progress(t, 0.84, 1.0));
+                    final ballSize = _lerp(resting, active, swell);
                     final topHome = half * 0.5;
                     final bottomHome = half * 1.5;
                     final topCenter = crossing
@@ -281,6 +286,27 @@ class _TradeRoomState extends State<TradeRoom>
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: _Side(
+                    pokemon: widget.fromPlayerOne,
+                    lane: Gba.crimson,
+                    label: 'PLAYER 1',
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _Side(
+                    pokemon: widget.fromPlayerTwo,
+                    lane: Gba.leaf,
+                    label: 'PLAYER 2',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
             TypewriterText(
               text:
                   'TRADE ${widget.fromPlayerOne.speciesName} FOR '
@@ -321,9 +347,10 @@ class _TradeRoomState extends State<TradeRoom>
             Text(
               failed
                   ? (widget.errorMessage ?? 'THE ENGINE REFUSED THE EXCHANGE.')
-                  : '${widget.fromPlayerOne.speciesName} NOW BELONGS TO '
-                        'PLAYER 2.\n${widget.fromPlayerTwo.speciesName} NOW '
-                        'BELONGS TO PLAYER 1.',
+                  : 'PLAYER 1 RECEIVED ${widget.fromPlayerTwo.speciesName} '
+                        'INTO ${widget.fromPlayerTwo.slotLabel}.\n'
+                        'PLAYER 2 RECEIVED ${widget.fromPlayerOne.speciesName} '
+                        'INTO ${widget.fromPlayerOne.slotLabel}.',
               style: GbaText.label,
             ),
             const SizedBox(height: 10),
@@ -331,6 +358,57 @@ class _TradeRoomState extends State<TradeRoom>
           ],
         );
     }
+  }
+}
+
+/// One side of the trade in the confirm prompt: the ball, the creature and
+/// the slot it is standing in.
+class _Side extends StatelessWidget {
+  const _Side({
+    required this.pokemon,
+    required this.lane,
+    required this.label,
+  });
+
+  final PartyPokemon pokemon;
+  final Color lane;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: lane, width: 1),
+        borderRadius: BorderRadius.circular(2),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+      child: Row(
+        children: [
+          BallBadge(ballId: pokemon.ballId, size: 20),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  pokemon.speciesName,
+                  style: GbaText.name.copyWith(fontSize: 12),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  '${pokemon.slotLabel} · LV${pokemon.level}',
+                  style: GbaText.tiny,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -365,77 +443,6 @@ class _PlainOption extends StatelessWidget {
     );
   }
 }
-
-String? ballSpriteAsset(int? id) {
-  const names = <int, String>{
-    1: 'master-ball',
-    2: 'ultra-ball',
-    3: 'great-ball',
-    4: 'poke-ball',
-    5: 'safari-ball',
-    6: 'net-ball',
-    7: 'dive-ball',
-    8: 'nest-ball',
-    9: 'repeat-ball',
-    10: 'timer-ball',
-    11: 'luxury-ball',
-    12: 'premier-ball',
-    13: 'dusk-ball',
-    14: 'heal-ball',
-    15: 'quick-ball',
-    16: 'cherish-ball',
-    492: 'fast-ball',
-    493: 'level-ball',
-    494: 'lure-ball',
-    495: 'heavy-ball',
-    496: 'love-ball',
-    497: 'friend-ball',
-    498: 'moon-ball',
-    499: 'sport-ball',
-    500: 'park-ball',
-    576: 'dream-ball',
-    851: 'beast-ball',
-  };
-  final name = id == null ? null : names[id];
-  return name == null ? null : 'assets/images/balls/$name.png';
-}
-
-String ballName(int id) {
-  const names = <int, String>{
-    1: 'MASTER BALL',
-    2: 'ULTRA BALL',
-    3: 'GREAT BALL',
-    4: 'POKÉ BALL',
-    5: 'SAFARI BALL',
-    6: 'NET BALL',
-    7: 'DIVE BALL',
-    8: 'NEST BALL',
-    9: 'REPEAT BALL',
-    10: 'TIMER BALL',
-    11: 'LUXURY BALL',
-    12: 'PREMIER BALL',
-    13: 'DUSK BALL',
-    14: 'HEAL BALL',
-    15: 'QUICK BALL',
-    16: 'CHERISH BALL',
-    492: 'FAST BALL',
-    493: 'LEVEL BALL',
-    494: 'LURE BALL',
-    495: 'HEAVY BALL',
-    496: 'LOVE BALL',
-    497: 'FRIEND BALL',
-    498: 'MOON BALL',
-    499: 'SPORT BALL',
-    500: 'PARK BALL',
-    576: 'DREAM BALL',
-    851: 'BEAST BALL',
-  };
-  return names[id] ?? 'UNKNOWN BALL';
-}
-
-/// Whether the ball has artwork of its own. Only the twelve classic balls
-/// were drawn, so the rarer balls fall back to a marker with their name.
-bool hasBallSprite(int? id) => ballSpriteAsset(id) != null;
 
 class _UnknownBallMark extends StatelessWidget {
   const _UnknownBallMark({required this.size, this.label = 'UNKNOWN'});

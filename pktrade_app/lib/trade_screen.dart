@@ -6,7 +6,8 @@ import 'package:flutter/services.dart';
 
 import 'models.dart';
 import 'theme.dart';
-import 'widgets/box_picker.dart';
+import 'widgets/storage_screen.dart';
+import 'widgets/transfer_preview_dialog.dart';
 import 'widgets/gba_widgets.dart';
 import 'widgets/link_strip.dart';
 import 'widgets/trade_room.dart';
@@ -35,6 +36,8 @@ class _TradeScreenState extends State<TradeScreen> {
   bool _busy = false;
   bool _picking = false;
   bool _showRoom = false;
+  bool _showStorage = false;
+  bool _storageForPlayerOne = true;
   TradeOutcome _outcome = TradeOutcome.pending;
   String? _error;
   bool _openingPreview = false;
@@ -180,15 +183,10 @@ class _TradeScreenState extends State<TradeScreen> {
       });
     }
     if (!mounted) return;
-    final picked = await BoxPicker.show(context, slots);
-    if (picked == null || !mounted) return;
     HapticFeedback.selectionClick();
     setState(() {
-      if (playerOne) {
-        _selectedSlotA = picked;
-      } else {
-        _selectedSlotB = picked;
-      }
+      _storageForPlayerOne = playerOne;
+      _showStorage = true;
     });
   }
 
@@ -225,7 +223,7 @@ class _TradeScreenState extends State<TradeScreen> {
       await showDialog<void>(
         context: context,
         barrierDismissible: !preview.supported,
-        builder: (dialogContext) => _TransferPreviewDialog(
+        builder: (dialogContext) => TransferPreviewDialog(
           playerOne: a,
           playerTwo: b,
           sourceGeneration: _saveA!.generation,
@@ -311,7 +309,26 @@ class _TradeScreenState extends State<TradeScreen> {
       body: DeviceShell(
         child: Stack(
           children: [
-            Positioned.fill(child: LcdReveal(child: _table())),
+            Positioned.fill(
+              child: LcdReveal(
+                child: AnimatedSwitcher(
+                  duration: GbaMotion.base,
+                  switchInCurve: GbaMotion.settle,
+                  switchOutCurve: GbaMotion.glide,
+                  transitionBuilder: (child, animation) {
+                    final slide = Tween<Offset>(
+                      begin: const Offset(0.18, 0),
+                      end: Offset.zero,
+                    ).animate(animation);
+                    return FadeTransition(
+                      opacity: animation,
+                      child: SlideTransition(position: slide, child: child),
+                    );
+                  },
+                  child: _showStorage ? _storage() : _table(),
+                ),
+              ),
+            ),
             if (_showRoom)
               Positioned.fill(
                 child: TradeRoom(
@@ -343,6 +360,43 @@ class _TradeScreenState extends State<TradeScreen> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// The storage screen of one side, opened over the table.
+  Widget _storage() {
+    final playerOne = _storageForPlayerOne;
+    final slots = playerOne ? _slotsA : _slotsB;
+    final data = playerOne ? _saveA : _saveB;
+    return Padding(
+      padding: const EdgeInsets.all(2),
+      child: GbaWindow(
+        child: StorageScreen(
+          key: ValueKey('storage-$playerOne'),
+          slots: slots ??
+              const SaveSlots(
+                generation: 0,
+                boxCount: 0,
+                boxCapacity: 0,
+                slots: [],
+              ),
+          trainerName: data?.trainerName ?? '',
+          generation: slots?.generation ?? data?.generation ?? 0,
+          lane: playerOne ? Gba.crimson : Gba.leaf,
+          selectedSlot: playerOne ? _selectedSlotA : _selectedSlotB,
+          onPick: (ref) {
+            setState(() {
+              if (playerOne) {
+                _selectedSlotA = ref;
+              } else {
+                _selectedSlotB = ref;
+              }
+              _showStorage = false;
+            });
+          },
+          onClose: () => setState(() => _showStorage = false),
         ),
       ),
     );
@@ -406,89 +460,6 @@ class _TradeScreenState extends State<TradeScreen> {
   }
 }
 
-class _TransferPreviewDialog extends StatelessWidget {
-  const _TransferPreviewDialog({
-    required this.playerOne,
-    required this.playerTwo,
-    required this.sourceGeneration,
-    required this.targetGeneration,
-    required this.preview,
-    required this.onContinue,
-  });
-
-  final PartyPokemon playerOne;
-  final PartyPokemon playerTwo;
-  final int sourceGeneration;
-  final int targetGeneration;
-  final TransferPreview preview;
-  final VoidCallback? onContinue;
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.all(18),
-      child: GbaWindow(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('TRANSFER CHECK', style: GbaText.name),
-            const SizedBox(height: 8),
-            Text(
-              'PLAYER 1: ${playerOne.speciesName}  →  GEN $targetGeneration\n'
-              'PLAYER 2: ${playerTwo.speciesName}  →  GEN $sourceGeneration',
-              style: GbaText.label.copyWith(color: Gba.ink),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              preview.message,
-              style: GbaText.label.copyWith(color: Gba.ink),
-            ),
-            if (preview.losses.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Text('DATA THAT CANNOT BE KEPT', style: GbaText.label),
-              const SizedBox(height: 4),
-              for (final loss in preview.losses)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text('• $loss', style: GbaText.tiny),
-                ),
-            ],
-            const SizedBox(height: 12),
-            if (preview.supported)
-              OptionBar(
-                label: preview.lossy ? 'ACCEPT DATA LOSS' : 'CONTINUE',
-                attention: true,
-                onPressed: onContinue,
-              )
-            else ...[
-              Text('NO CHANGES WILL BE MADE', style: GbaText.tiny),
-              const SizedBox(height: 8),
-              const OptionBar(label: 'UNAVAILABLE', onPressed: null),
-            ],
-            const SizedBox(height: 6),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              style: TextButton.styleFrom(
-                foregroundColor: Gba.ink,
-                minimumSize: const Size.fromHeight(44),
-              ),
-              child: Text(
-                'CANCEL',
-                style: GbaText.label.copyWith(color: Gba.ink),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// A message box that drops in from the top edge of the screen, the way the
-/// handheld pushes a notice over the play field. Tapping it clears the message.
 class _NoticeBox extends StatelessWidget {
   const _NoticeBox({required this.message, required this.onDismiss});
 

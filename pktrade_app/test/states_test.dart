@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pktrade_app/theme.dart';
 import 'package:pktrade_app/trade_screen.dart';
 import 'package:pktrade_app/widgets/gba_widgets.dart';
+import 'package:pktrade_app/widgets/trade_room.dart';
 import 'package:pktrade_app/widgets/trainer_window.dart';
 
 const _channel = MethodChannel('com.pktrade/bridge');
@@ -260,17 +261,23 @@ void main() {
     await tester.tap(find.text('YES'), warnIfMissed: false);
     await tester.pump();
 
-    final masterBall = find.byWidgetPredicate(
-      (widget) =>
-          widget is Image &&
-          widget.image ==
-              const AssetImage('assets/images/balls/master-ball.png'),
+    final masterBall = find.descendant(
+      of: find.byType(TradeRoom),
+      matching: find.byWidgetPredicate(
+        (widget) =>
+            widget is Image &&
+            widget.image ==
+                const AssetImage('assets/images/balls/master-ball.png'),
+      ),
     );
-    final premierBall = find.byWidgetPredicate(
-      (widget) =>
-          widget is Image &&
-          widget.image ==
-              const AssetImage('assets/images/balls/premier-ball.png'),
+    final premierBall = find.descendant(
+      of: find.byType(TradeRoom),
+      matching: find.byWidgetPredicate(
+        (widget) =>
+            widget is Image &&
+            widget.image ==
+                const AssetImage('assets/images/balls/premier-ball.png'),
+      ),
     );
     expect(masterBall, findsOneWidget);
     expect(premierBall, findsOneWidget);
@@ -353,12 +360,15 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
 
     await tester.tap(find.text('BOXES').first, warnIfMissed: false);
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('025 PIKACHU'), findsOneWidget);
+    expect(find.text('STORAGE'), findsOneWidget);
+    expect(find.text('PIKACHU'), findsOneWidget);
 
-    await tester.tap(find.text('025 PIKACHU'), warnIfMissed: false);
+    await tester.tap(find.text('PIKACHU').first, warnIfMissed: false);
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('025 PIKACHU'), findsNothing);
+    expect(find.text('STORAGE'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -401,7 +411,7 @@ void main() {
             widget.image ==
                 const AssetImage('assets/images/balls/cherish-ball.png'),
       ),
-      findsOneWidget,
+      findsWidgets,
     );
     expect(tester.takeException(), isNull);
   });

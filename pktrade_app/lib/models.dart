@@ -28,6 +28,23 @@ class PartyPokemon {
   /// Slot reference of this record, for example `party:1` or `box:2/5`.
   final String slot;
 
+  /// Where this record sits, in words a player would use.
+  String get slotLabel {
+    if (slot.isEmpty) return '';
+    if (slot.startsWith('party:')) return 'PARTY ${slot.split(':').last}';
+    final parts = slot.split('/');
+    if (parts.length != 2) return slot.toUpperCase();
+    return 'BOX ${parts[0].split(':').last}/${parts[1]}';
+  }
+
+  /// The box this record sits in, zero when it is in the party.
+  int get boxNumber {
+    if (slot.isEmpty || slot.startsWith('party:')) return 0;
+    final parts = slot.split('/');
+    if (parts.length != 2) return 0;
+    return int.tryParse(parts[0].split(':').last) ?? 0;
+  }
+
   String get speciesName => speciesLabel(species, generation);
 
   String get dexLabel {
@@ -156,12 +173,16 @@ class TransferPreview {
     required this.lossy,
     required this.message,
     required this.losses,
+    this.evolutions = const [],
   });
 
   final bool supported;
   final bool lossy;
   final String message;
   final List<String> losses;
+
+  /// The evolutions the trade will trigger.
+  final List<TradeEvolution> evolutions;
 
   factory TransferPreview.fromJson(Map<String, dynamic> json) =>
       TransferPreview(
@@ -173,6 +194,42 @@ class TransferPreview {
         losses: (json['losses'] as List<dynamic>? ?? const [])
             .whereType<String>()
             .toList(growable: false),
+        evolutions: (json['evolutions'] as List<dynamic>? ?? const [])
+            .whereType<Map>()
+            .map((e) => TradeEvolution.fromJson(Map<String, dynamic>.from(e)))
+            .toList(growable: false),
+      );
+}
+
+/// One evolution a trade will trigger.
+class TradeEvolution {
+  const TradeEvolution({
+    required this.from,
+    required this.to,
+    required this.fromName,
+    required this.toName,
+    this.itemName = '',
+  });
+
+  final int from;
+  final int to;
+  final String fromName;
+  final String toName;
+  final String itemName;
+
+  String get label {
+    final was = fromName.isEmpty ? '#$from' : fromName.toUpperCase();
+    final now = toName.isEmpty ? '#$to' : toName.toUpperCase();
+    return itemName.isEmpty ? '$was → $now' : '$was → $now  ($itemName)';
+  }
+
+  factory TradeEvolution.fromJson(Map<String, dynamic> json) =>
+      TradeEvolution(
+        from: (json['from'] as num?)?.toInt() ?? 0,
+        to: (json['to'] as num?)?.toInt() ?? 0,
+        fromName: (json['fromName'] as String?) ?? '',
+        toName: (json['toName'] as String?) ?? '',
+        itemName: (json['itemName'] as String?) ?? '',
       );
 }
 

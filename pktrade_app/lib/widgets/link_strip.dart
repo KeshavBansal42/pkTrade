@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models.dart';
 import '../theme.dart';
+import 'ball_art.dart';
 
 /// The cable between the two trainers. It shows the pending exchange before
 /// anything is written: two outline bays while empty, and two filled chips with
@@ -104,11 +105,8 @@ class _Bay extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (chosen) ...[
-            Text(
-              p.dexLabel,
-              style: GbaText.number.copyWith(color: Gba.onColor),
-            ),
-            const SizedBox(width: 6),
+            BallBadge(ballId: p.ballId, size: 16),
+            const SizedBox(width: 5),
           ],
           Flexible(
             child: Text(
@@ -120,6 +118,16 @@ class _Bay extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
+          if (chosen) ...[
+            const SizedBox(width: 5),
+            Text(
+              p.slotLabel,
+              style: GbaText.tiny.copyWith(
+                color: Gba.onColor.withValues(alpha: 0.8),
+                fontSize: 8,
+              ),
+            ),
+          ],
         ],
       ),
     );
