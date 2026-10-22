@@ -345,6 +345,39 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('the console d-pad walks the party and the keyboard mirrors it', (
+    tester,
+  ) async {
+    await _loadFonts();
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(const MaterialApp(home: TradeScreen()));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.tap(find.text('INSERT SAVE').first, warnIfMissed: false);
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('INSERT SAVE').first, warnIfMissed: false);
+    await tester.pump(const Duration(milliseconds: 600));
+
+    // The D-pad lands on the first member of player one.
+    await tester.tap(find.bySemanticsLabel('D-pad down'), warnIfMissed: false);
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.text('PARTY 1'), findsWidgets);
+
+    // The keyboard walks the same list.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.text('PARTY 2'), findsWidgets);
+
+    // And the right arrow moves the focus to the other player.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.text('TRADE'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('a boxed Pokémon can be picked from the storage screen', (
     tester,
   ) async {

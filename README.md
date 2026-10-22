@@ -129,6 +129,41 @@ The app reaches the boxes through `ListSlotsJSON`: the storage screen lists
 every box of a save, and the slot reference of the chosen Pokémon (`party:3`,
 `box:2/11`) is what the preview and the trade use.
 
+## The app
+
+The interface is a handheld console: a plum plastic shell with a moulded lip, a
+dark bezel sunk into it, a bright LCD with a faint scan pattern, and real
+controls along the chin.
+
+* **The console works.** The D-pad walks the party list, A picks the
+  highlighted Pokémon, B opens the storage and START sends the trade. The
+  keyboard mirrors it: the arrows walk, enter picks, escape opens the storage
+  and space sends the trade. The shell gives way to fit a narrow phone: the
+  speaker and the wide pills step aside under 360 points.
+* **The table** — the two saves face each other with a cable between them. Each
+  side lists its party, every row carrying the creature's dex number and the
+  ball it was caught in. The selected row names the slot it came from.
+* **Storage** — `BOXES` opens the save's boxes as a full screen, one box at a
+  time, the way the game's own PC screen takes over. It slides in over the
+  table and the chosen Pokémon drops straight into the trade.
+* **The transfer check** — both creatures side by side with their balls, their
+  slots, and any evolution the trade will trigger, before anything is written.
+* **The trade** — the two balls rise from their trainer's side, cross, and land
+  on the other side with a flash, and the result names the slots that changed.
+  Tapping anywhere skips to the end.
+* **The boot** — the panel lights up with a sweep of light when the machine
+  wakes.
+
+Motion answers input: the only unrequested movement is the power-on. Everything
+else — the row highlight, the storage page, the notice, the ball swap, the
+button presses — answers a tap, and the whole app collapses to instant state
+changes when the platform asks for reduced motion.
+
+The ball artwork is the official Pokémon item art. The capture ball is read
+out of the record — the original-trainer block in Gen 4 to Gen 8 and the
+origins block in Gen 3. Gen 1 and Gen 2 do not store a ball at all, so those
+trades show no ball rather than a wrong one.
+
 ## Ball sprites
 
 The capture ball of a traded Pokémon is read out of the record: the ball byte

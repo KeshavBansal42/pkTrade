@@ -8,6 +8,7 @@ import 'models.dart';
 import 'theme.dart';
 import 'widgets/storage_screen.dart';
 import 'widgets/transfer_preview_dialog.dart';
+import 'widgets/console.dart';
 import 'widgets/gba_widgets.dart';
 import 'widgets/link_strip.dart';
 import 'widgets/trade_room.dart';
@@ -38,6 +39,7 @@ class _TradeScreenState extends State<TradeScreen> {
   bool _showRoom = false;
   bool _showStorage = false;
   bool _storageForPlayerOne = true;
+  int _focusedSide = 0;
   TradeOutcome _outcome = TradeOutcome.pending;
   String? _error;
   bool _openingPreview = false;
@@ -66,6 +68,101 @@ class _TradeScreenState extends State<TradeScreen> {
       _pickedB != null &&
       !_busy &&
       !_picking;
+
+  /// The side the D-pad is walking: 0 is player one, 1 is player two.
+  bool get _focusIsPlayerOne => _focusedSide == 0;
+
+  /// Moves the selection inside the focused side's party.
+  void _moveSelection(int delta) {
+    final data = _focusIsPlayerOne ? _saveA : _saveB;
+    if (data == null || data.party.isEmpty) return;
+    final current = _focusIsPlayerOne ? _selectedSlotA : _selectedSlotB;
+    if (current == null) {
+      // The first press lands on the top of the list.
+      _selectSlot(data.party.first.slot, playerOne: _focusIsPlayerOne);
+      return;
+    }
+    var index = 0;
+    for (var i = 0; i < data.party.length; i++) {
+      if (data.party[i].slot == current) {
+        index = i;
+        break;
+      }
+    }
+    final next = (index + delta).clamp(0, data.party.length - 1);
+    _selectSlot(data.party[next].slot, playerOne: _focusIsPlayerOne);
+  }
+
+  /// Moves the highlight to a slot on one side.
+  void _selectSlot(String ref, {required bool playerOne}) {
+    HapticFeedback.selectionClick();
+    setState(() {
+      if (playerOne) {
+        _selectedSlotA = ref;
+      } else {
+        _selectedSlotB = ref;
+      }
+    });
+  }
+
+  /// The A button: pick whatever the D-pad is on, or open the storage when
+  /// nothing is highlighted yet.
+  void _confirmFromConsole() {
+    final data = _focusIsPlayerOne ? _saveA : _saveB;
+    if (data == null) return;
+    final current = _focusIsPlayerOne ? _selectedSlotA : _selectedSlotB;
+    if (current == null && data.party.isNotEmpty) {
+      _moveSelection(0);
+      return;
+    }
+    if (current == null) {
+      _openBoxes(playerOne: _focusIsPlayerOne);
+    }
+  }
+
+  void _handleDirection(DpadDirection direction) {
+    switch (direction) {
+      case DpadDirection.up:
+        _moveSelection(-1);
+      case DpadDirection.down:
+        _moveSelection(1);
+      case DpadDirection.left:
+        setState(() => _focusedSide = 0);
+      case DpadDirection.right:
+        setState(() => _focusedSide = 1);
+    }
+  }
+
+  /// The keyboard mirrors the console: the arrows walk the list, enter picks,
+  /// escape opens the storage and the space bar sends the trade.
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    switch (event.logicalKey) {
+      case LogicalKeyboardKey.arrowUp:
+        _handleDirection(DpadDirection.up);
+        return KeyEventResult.handled;
+      case LogicalKeyboardKey.arrowDown:
+        _handleDirection(DpadDirection.down);
+        return KeyEventResult.handled;
+      case LogicalKeyboardKey.arrowLeft:
+        _handleDirection(DpadDirection.left);
+        return KeyEventResult.handled;
+      case LogicalKeyboardKey.arrowRight:
+        _handleDirection(DpadDirection.right);
+        return KeyEventResult.handled;
+      case LogicalKeyboardKey.enter:
+      case LogicalKeyboardKey.numpadEnter:
+        _confirmFromConsole();
+        return KeyEventResult.handled;
+      case LogicalKeyboardKey.escape:
+        _openBoxes(playerOne: _focusIsPlayerOne);
+        return KeyEventResult.handled;
+      case LogicalKeyboardKey.space:
+        if (_ready) _openTransferPreview();
+        return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
 
   void _say(String message) {
     _noticeTimer?.cancel();
@@ -305,61 +402,69 @@ class _TradeScreenState extends State<TradeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Gba.bezel,
-      body: DeviceShell(
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: LcdReveal(
-                child: AnimatedSwitcher(
-                  duration: GbaMotion.base,
-                  switchInCurve: GbaMotion.settle,
-                  switchOutCurve: GbaMotion.glide,
-                  transitionBuilder: (child, animation) {
-                    final slide = Tween<Offset>(
-                      begin: const Offset(0.18, 0),
-                      end: Offset.zero,
-                    ).animate(animation);
-                    return FadeTransition(
-                      opacity: animation,
-                      child: SlideTransition(position: slide, child: child),
-                    );
-                  },
-                  child: _showStorage ? _storage() : _table(),
-                ),
-              ),
-            ),
-            if (_showRoom)
+      backgroundColor: Gba.shell,
+      body: Focus(
+        autofocus: true,
+        onKeyEvent: _handleKey,
+        child: DeviceShell(
+          onDirection: _handleDirection,
+          onConfirm: _confirmFromConsole,
+          onSecondary: () => _openBoxes(playerOne: _focusIsPlayerOne),
+          onStart: _ready ? _openTransferPreview : null,
+          child: Stack(
+            children: [
               Positioned.fill(
-                child: TradeRoom(
-                  fromPlayerOne: _pickedA!,
-                  fromPlayerTwo: _pickedB!,
-                  outcome: _outcome,
-                  errorMessage: _error,
-                  onCommit: _runTrade,
-                  onDismiss: _closeRoom,
+                child: LcdBoot(
+                  child: AnimatedSwitcher(
+                    duration: GbaMotion.base,
+                    switchInCurve: GbaMotion.settle,
+                    switchOutCurve: GbaMotion.glide,
+                    transitionBuilder: (child, animation) {
+                      final slide = Tween<Offset>(
+                        begin: const Offset(0.18, 0),
+                        end: Offset.zero,
+                      ).animate(animation);
+                      return FadeTransition(
+                        opacity: animation,
+                        child: SlideTransition(position: slide, child: child),
+                      );
+                    },
+                    child: _showStorage ? _storage() : _table(),
+                  ),
                 ),
               ),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: AnimatedSlide(
-                offset: _notice == null ? const Offset(0, -1.3) : Offset.zero,
-                duration: GbaMotion.base,
-                curve: GbaMotion.settle,
-                child: _notice == null
-                    ? const SizedBox(width: double.infinity)
-                    : _NoticeBox(
-                        message: _notice!,
-                        onDismiss: () {
-                          _noticeTimer?.cancel();
-                          setState(() => _notice = null);
-                        },
-                      ),
+              if (_showRoom)
+                Positioned.fill(
+                  child: TradeRoom(
+                    fromPlayerOne: _pickedA!,
+                    fromPlayerTwo: _pickedB!,
+                    outcome: _outcome,
+                    errorMessage: _error,
+                    onCommit: _runTrade,
+                    onDismiss: _closeRoom,
+                  ),
+                ),
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: AnimatedSlide(
+                  offset: _notice == null ? const Offset(0, -1.3) : Offset.zero,
+                  duration: GbaMotion.base,
+                  curve: GbaMotion.settle,
+                  child: _notice == null
+                      ? const SizedBox(width: double.infinity)
+                      : _NoticeBox(
+                          message: _notice!,
+                          onDismiss: () {
+                            _noticeTimer?.cancel();
+                            setState(() => _notice = null);
+                          },
+                        ),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

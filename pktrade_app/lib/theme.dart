@@ -2,18 +2,31 @@ import 'package:flutter/material.dart';
 
 /// Colour, type and motion for the handheld UI.
 ///
-/// The screen is a bright reflective LCD, not a dark app: a flat cream field,
-/// navy ink, and chunky navy frames around every window. Depth comes only from
-/// borders and two-tone bevels, never from gradients or soft shadows. The
-/// console body around the screen is graphite, like the neutral GBA hardware,
-/// and is the only place texture appears.
+/// The machine is a handheld console, not a terminal: a plum plastic shell
+/// with a moulded lip, a dark bezel sunk into it, and a bright LCD in the
+/// middle. The screen is a reflective panel, not a dark app: a flat cream
+/// field and navy ink. Depth comes from borders and two-tone bevels, never from
+/// gradients or soft shadows on the screen itself; the only gradients live on
+/// the plastic around it.
 class Gba {
   Gba._();
 
-  // Graphite console shell
-  static const bezel = Color(0xFF55585C);
-  static const bezelLight = Color(0xFF777B80);
-  static const bezelDark = Color(0xFF34373B);
+  // Console shell: plum plastic with a lighter moulded lip.
+  static const shell = Color(0xFF3A2F5E);
+  static const shellLight = Color(0xFF544479);
+  static const shellDark = Color(0xFF241C40);
+  static const shellEdge = Color(0xFF6A5896);
+
+  // Screen bezel, sunk into the shell.
+  static const bezel = Color(0xFF171226);
+  static const bezelLight = Color(0xFF241B3C);
+
+  // Console controls.
+  static const button = Color(0xFF4C3E75);
+  static const buttonLight = Color(0xFF6A5896);
+  static const buttonDark = Color(0xFF2A2148);
+  static const lamp = Color(0xFF6BE86B);
+  static const grille = Color(0xFF1B1430);
 
   // LCD surface
   static const screen = Color(0xFFF2F2E9);
@@ -124,10 +137,12 @@ class GbaMotion {
   static const typeBeat = Duration(milliseconds: 26);
   static const swap = Duration(milliseconds: 2200);
   static const cursorBlink = Duration(milliseconds: 560);
+  static const boot = Duration(milliseconds: 900);
 
   static const settle = Cubic(0.2, 1, 0.3, 1);
   static const glide = Cubic(0.4, 0, 0.2, 1);
   static const snap = Cubic(0.85, 0, 0.15, 1);
+  static const power = Cubic(0.1, 0.9, 0.2, 1);
 }
 
 /// True when the platform asks for reduced motion. Long reveals collapse to an

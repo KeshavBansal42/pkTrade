@@ -10,7 +10,7 @@ void main() {
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.light,
-      systemNavigationBarColor: Gba.bezelDark,
+      systemNavigationBarColor: Gba.shellDark,
       systemNavigationBarIconBrightness: Brightness.light,
     ),
   );
@@ -29,7 +29,7 @@ class PkTradeApp extends StatelessWidget {
         useMaterial3: true,
         brightness: Brightness.light,
         fontFamily: 'Silkscreen',
-        scaffoldBackgroundColor: Gba.bezel,
+        scaffoldBackgroundColor: Gba.shell,
         splashFactory: NoSplash.splashFactory,
         colorScheme: const ColorScheme.light(
           primary: Gba.action,
