@@ -7,6 +7,7 @@ import (
 
 	"pktrade/internal/core"
 	"pktrade/internal/gen2"
+	"pktrade/internal/gen3"
 	"pktrade/internal/modern"
 )
 
@@ -197,6 +198,262 @@ func TestGen2RoundTrip(t *testing.T) {
 	compareNeutral(t, first, second)
 	if second.Friendship != 70 {
 		t.Errorf("friendship = %d, want 70", second.Friendship)
+	}
+}
+
+// neutralsForNature builds two identical Pikachu records that differ only in
+// nature. Nature 3 is Adamant (+Atk, -SpA); nature 15 is Modest (+SpA, -Atk).
+func pikachuAtLevel50(nature byte) *Neutral {
+	return &Neutral{
+		Species: 25, Level: 50, Exp: 125000,
+		Nature: nature, HasNature: true,
+		PID: uint32(nature), HasPID: true,
+		TID: 1234, SID: 5678, HasSID: true,
+		Gender: genderFromPID(25, uint32(nature)),
+		IVs:    [6]byte{31, 31, 31, 31, 31, 31},
+		Moves:  [4]uint16{85, 0, 0, 0}, MovePP: [4]byte{15, 0, 0, 0},
+		Nick: "PIKACHU", OT: "ASH",
+	}
+}
+
+func TestGen3NatureAffectsTheCorrectStats(t *testing.T) {
+	adamant, _, err := ImportGen3(pikachuAtLevel50(3), Party)
+	if err != nil {
+		t.Fatalf("adamant import: %v", err)
+	}
+	modest, _, err := ImportGen3(pikachuAtLevel50(15), Party)
+	if err != nil {
+		t.Fatalf("modest import: %v", err)
+	}
+	stat := func(p *gen3.Pokemon, off int) uint16 {
+		return binary.LittleEndian.Uint16(p.RawData[off:])
+	}
+	// Gen 3 party stats: 0x5A Atk, 0x5C Def, 0x60 SpA.
+	const atk, def, spa = 0x5A, 0x5C, 0x60
+	if got := stat(adamant, atk); got != 82 {
+		t.Errorf("Adamant Atk = %d, want 82", got)
+	}
+	if got := stat(adamant, spa); got != 63 {
+		t.Errorf("Adamant SpA = %d, want 63", got)
+	}
+	if got := stat(modest, atk); got != 67 {
+		t.Errorf("Modest Atk = %d, want 67", got)
+	}
+	if got := stat(modest, spa); got != 77 {
+		t.Errorf("Modest SpA = %d, want 77", got)
+	}
+	// Gen 3 Pikachu has Def 30, so a level-50, 31-IV Defense is 50; neither
+	// nature touches Defense.
+	if stat(adamant, def) != 50 || stat(modest, def) != 50 {
+		t.Errorf("Defense must be untouched by both natures, got %d and %d",
+			stat(adamant, def), stat(modest, def))
+	}
+}
+
+func TestGen3RoundTrip(t *testing.T) {
+	n := pikachuAtLevel50(3)
+	n.Moves = [4]uint16{85, 86, 0, 0}
+	n.MovePP = [4]byte{15, 10, 0, 0}
+	n.MovePPUp = [4]byte{1, 2, 0, 0}
+	n.HeldItem = 221 // King's Rock (canonical Gen 4+ id)
+	n.HasBall = true
+	n.Ball = 4 // Poké Ball
+	n.Friendship = 100
+	n.HasFriendship = true
+
+	g3, _, err := ImportGen3(n, Party)
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	back, _, err := ExportGen3(g3)
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	compareNeutral(t, n, back)
+	if back.HeldItem != 221 {
+		t.Errorf("held item = %d, want 221 (King's Rock)", back.HeldItem)
+	}
+	if back.Friendship != 100 {
+		t.Errorf("friendship = %d, want 100", back.Friendship)
+	}
+	if !back.HasBall || back.Ball != 4 {
+		t.Errorf("ball = %d,%v, want 4,true", back.Ball, back.HasBall)
+	}
+}
+
+func TestGen1Stats(t *testing.T) {
+	// A level-50 Pikachu with all DVs 15 and no stat experience. Attack DV 15
+	// is male for Pikachu's gender ratio, so the DV is not nudged.
+	n := pikachuAtLevel50(3)
+	n.Gender = 0
+	g1, _, err := ImportGen1(n, Party)
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	stat := func(off int) uint16 { return binary.BigEndian.Uint16(g1.RawData[off:]) }
+	checks := map[int]uint16{0x22: 110, 0x24: 75, 0x26: 50, 0x28: 110, 0x2A: 70}
+	for off, want := range checks {
+		if got := stat(off); got != want {
+			t.Errorf("Gen 1 stat at 0x%X = %d, want %d", off, got, want)
+		}
+	}
+}
+
+func TestGen2Stats(t *testing.T) {
+	n := pikachuAtLevel50(3)
+	n.Gender = 0
+	g2, _, err := ImportGen2(n, Party)
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	stat := func(off int) uint16 { return binary.BigEndian.Uint16(g2.RawData[off:]) }
+	// 0x22 MaxHP, 0x26 Atk, 0x28 Def, 0x2A Spe, 0x2C SpA, 0x2E SpD.
+	checks := map[int]uint16{0x22: 110, 0x26: 75, 0x28: 50, 0x2A: 110, 0x2C: 70, 0x2E: 60}
+	for off, want := range checks {
+		if got := stat(off); got != want {
+			t.Errorf("Gen 2 stat at 0x%X = %d, want %d", off, got, want)
+		}
+	}
+}
+
+func TestModernNatureAffectsTheCorrectStats(t *testing.T) {
+	// Adamant Pikachu (+Atk, -SpA) at level 50 with 31 IVs and no EVs.
+	n := pikachuAtLevel50(3)
+	g6, _, err := ImportModern(n, modern.Format6, Party)
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	f := modern.Format6
+	stat := func(off int) uint16 { return binary.LittleEndian.Uint16(g6.Data[off:]) }
+	if got := stat(f.Atk); got != 82 {
+		t.Errorf("Atk = %d, want 82", got)
+	}
+	if got := stat(f.SpA); got != 63 {
+		t.Errorf("SpA = %d, want 63", got)
+	}
+	// Gen 6 Pikachu has Def 40, so its Defense is 60 and untouched by the nature.
+	if got := stat(f.Def); got != 60 {
+		t.Errorf("Def = %d, want 60", got)
+	}
+}
+
+func TestShinySurvivesCrossGeneration(t *testing.T) {
+	p, err := modern.Parse(modern.Format6, readFixture(t, "pk6.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, _, err := ExportModern(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n.Shiny = true
+	n.SID = sidForShiny(n.TID, n.PID)
+
+	g3, _, err := ImportGen3(n, Party)
+	if err != nil {
+		t.Fatalf("to Gen 3: %v", err)
+	}
+	ng, _, err := ExportGen3(g3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ng.Shiny || !isShiny(ng.TID, ng.SID, ng.PID) {
+		t.Errorf("Gen 3 lost the shiny: shiny=%v pid=%08X tid=%d sid=%d", ng.Shiny, ng.PID, ng.TID, ng.SID)
+	}
+
+	g6, _, err := ImportModern(ng, modern.Format6, Party)
+	if err != nil {
+		t.Fatalf("to Gen 6: %v", err)
+	}
+	ng6, _, err := ExportModern(g6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ng6.Shiny {
+		t.Error("Gen 6 lost the shiny")
+	}
+
+	g2, _, err := ImportGen2(ng, Box)
+	if err != nil {
+		t.Fatalf("to Gen 2: %v", err)
+	}
+	ng2, _, err := ExportGen2(g2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ng2.Shiny {
+		t.Error("Gen 2 lost the shiny DV pattern")
+	}
+}
+
+func TestEVTotalIsCapped(t *testing.T) {
+	n := pikachuAtLevel50(3)
+	n.EVs = [6]uint16{255, 255, 255, 255, 255, 255}
+	g3, _, err := ImportGen3(n, Party)
+	if err != nil {
+		t.Fatalf("Gen 3 import: %v", err)
+	}
+	sum := 0
+	for _, ev := range g3.EVs {
+		sum += int(ev)
+	}
+	if sum > 510 {
+		t.Errorf("Gen 3 EV total = %d, want <= 510", sum)
+	}
+
+	g6, _, err := ImportModern(n, modern.Format6, Party)
+	if err != nil {
+		t.Fatalf("Gen 6 import: %v", err)
+	}
+	sum = 0
+	for i := 0; i < 6; i++ {
+		ev := int(g6.Data[modern.Format6.EV[i]])
+		if ev > 252 {
+			t.Errorf("Gen 6 EV %d = %d, want <= 252", i, ev)
+		}
+		sum += ev
+	}
+	if sum > 510 {
+		t.Errorf("Gen 6 EV total = %d, want <= 510", sum)
+	}
+}
+
+func TestItemTranslation(t *testing.T) {
+	// King's Rock is item 82 in Gen 2, 187 in Gen 3 and 221 from Gen 4 on.
+	if got, ok := itemToCanonical(3, 187); !ok || got != 221 {
+		t.Errorf("Gen 3 King's Rock -> canonical = %d,%v, want 221", got, ok)
+	}
+	if got, ok := itemForGen(3, 221); !ok || got != 187 {
+		t.Errorf("canonical -> Gen 3 = %d,%v, want 187", got, ok)
+	}
+	if got, ok := itemForGen(2, 221); !ok || got != 82 {
+		t.Errorf("canonical -> Gen 2 = %d,%v, want 82", got, ok)
+	}
+	if _, ok := itemForGen(1, 221); ok {
+		t.Error("Gen 1 has no held items and must report the item as unmapped")
+	}
+	if got, ok := itemToCanonical(1, 0); !ok || got != 0 {
+		t.Errorf("a zero item should always map, got %d,%v", got, ok)
+	}
+}
+
+func TestGen2DoesNotBecomeShinyByAccident(t *testing.T) {
+	n := pikachuAtLevel50(3)
+	// IV 21 -> DV 10 for every stat, which is the shiny DV pattern; the
+	// record itself is not shiny.
+	n.IVs = [6]byte{21, 21, 21, 21, 21, 21}
+	n.Shiny = false
+
+	g2, _, err := ImportGen2(n, Box)
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	ng2, _, err := ExportGen2(g2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ng2.Shiny {
+		t.Error("a non-shiny Pokémon turned shiny when converted into Gen 2")
 	}
 }
 

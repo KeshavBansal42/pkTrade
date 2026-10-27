@@ -91,15 +91,31 @@ func ImportGen3(n *Neutral, slot Slot) (*gen3.Pokemon, Losses, error) {
 	}
 
 	pid := uint32(0)
+	rebuilt := false
 	if n.HasPID && n.PID%25 == uint32(nature) {
 		pid = n.PID
 	} else {
+		rebuilt = true
 		built, ok := buildPID3(n.Species, n.TID, n.SID, nature, n.Gender, n.Shiny, n.HasSID)
 		if !ok {
-			built, _ = buildPID3(n.Species, n.TID, n.SID, nature, n.Gender, false, n.HasSID)
+			built, ok = buildPID3(n.Species, n.TID, n.SID, nature, n.Gender, false, n.HasSID)
 			losses.add("shiny", "no personality value could keep the Pokémon shiny and match its nature; the shiny was not kept")
 		}
+		if !ok {
+			built = n.PID
+			if built == 0 {
+				built = 1
+			}
+			losses.add("nature and gender", "no personality value matched; the nature or gender may differ")
+		}
 		pid = built
+		if n.HasPID {
+			losses.add("personality", "the personality value was rebuilt to keep the nature; PID-derived forms (Unown, Spinda, etc.) may change")
+		}
+	}
+	abilitySlot := n.AbilitySlot
+	if rebuilt {
+		abilitySlot = byte(pid & 1)
 	}
 
 	sid := n.SID
@@ -127,7 +143,7 @@ func ImportGen3(n *Neutral, slot Slot) (*gen3.Pokemon, Losses, error) {
 		Pokerus:          n.Pokerus,
 		MetLocation:      n.MetLocation,
 		MetLevel:         n.MetLevel,
-		AbilitySlot:      n.AbilitySlot,
+		AbilitySlot:      abilitySlot,
 	}
 	if !n.HasFriendship {
 		p.Friendship = 70
@@ -149,18 +165,18 @@ func ImportGen3(n *Neutral, slot Slot) (*gen3.Pokemon, Losses, error) {
 		if move != 0 && move > 354 {
 			losses.add(fmt.Sprintf("move %d", i+1), "the move does not exist in Generation III")
 			move = 0
+		} else {
+			p.PP[i] = n.MovePP[i]
+			p.PPUps |= (n.MovePPUp[i] & 0x03) << (2 * i)
 		}
 		p.Moves[i] = move
-		p.PP[i] = n.MovePP[i]
-		p.PPUps |= (n.MovePPUp[i] & 0x03) << (2 * i)
+	}
+	evs, evChanged := capEVs(n.EVs, 255, 510)
+	if evChanged {
+		losses.add("EVs", "the EVs were scaled or clamped to Generation III's 510 total cap")
 	}
 	for i := 0; i < 6; i++ {
-		ev := n.EVs[i]
-		if ev > 255 {
-			ev = 255
-			losses.add("EVs", "the EV total was above the Generation III cap and was clamped")
-		}
-		p.EVs[i] = byte(ev)
+		p.EVs[i] = byte(evs[i])
 	}
 	if n.HasBall && n.Ball >= 1 && n.Ball <= 12 {
 		p.BallID = n.Ball

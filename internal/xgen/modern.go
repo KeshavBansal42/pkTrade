@@ -82,15 +82,31 @@ func ImportModern(n *Neutral, format modern.Format, slot Slot) (*modern.Pokemon,
 
 	derives := format.Nature < 0 // Gen 4 derives the nature from the personality value
 	pid := uint32(0)
+	rebuilt := false
 	if n.HasPID && (!derives || n.PID%25 == uint32(nature)) {
 		pid = n.PID
 	} else {
+		rebuilt = true
 		built, ok := buildPID3(n.Species, n.TID, n.SID, nature, n.Gender, n.Shiny, n.HasSID)
 		if !ok {
-			built, _ = buildPID3(n.Species, n.TID, n.SID, nature, n.Gender, false, n.HasSID)
+			built, ok = buildPID3(n.Species, n.TID, n.SID, nature, n.Gender, false, n.HasSID)
 			losses.add("shiny", "no personality value could keep the Pokémon shiny and match its nature; the shiny was not kept")
 		}
+		if !ok {
+			built = n.PID
+			if built == 0 {
+				built = 1
+			}
+			losses.add("nature and gender", "no personality value matched; the nature or gender may differ")
+		}
 		pid = built
+		if n.HasPID {
+			losses.add("personality", "the personality value was rebuilt to keep the nature; PID-derived forms (Unown, Spinda, etc.) may change")
+		}
+	}
+	abilitySlot := n.AbilitySlot
+	if rebuilt {
+		abilitySlot = byte(pid & 1)
 	}
 	sid := n.SID
 	if !n.HasSID {
@@ -111,11 +127,24 @@ func ImportModern(n *Neutral, format modern.Format, slot Slot) (*modern.Pokemon,
 	p.SetExp(n.Exp)
 	p.SetNature(nature)
 	p.SetIVs(n.IVs)
-	p.SetIVFlags(false, n.AbilitySlot)
-	p.SetEVs(n.EVs)
-	p.SetMoves(n.Moves)
-	p.SetPP(n.MovePP)
-	p.SetPPUp(n.MovePPUp)
+	p.SetIVFlags(false, abilitySlot)
+	evs, evChanged := capEVs(n.EVs, 252, 510)
+	if evChanged {
+		losses.add("EVs", "the EVs were scaled or clamped to Generation 4+'s 252 per-stat / 510 total cap")
+	}
+	p.SetEVs(evs)
+	moves, pp, ppup := n.Moves, n.MovePP, n.MovePPUp
+	for i := 0; i < 4; i++ {
+		if moves[i] != 0 && moves[i] > MaxMoveID[gen] {
+			losses.add(fmt.Sprintf("move %d", i+1), fmt.Sprintf("the move does not exist in Generation %d", gen))
+			moves[i] = 0
+			pp[i] = 0
+			ppup[i] = 0
+		}
+	}
+	p.SetMoves(moves)
+	p.SetPP(pp)
+	p.SetPPUp(ppup)
 	p.SetNickname(n.Nick)
 	p.SetOTName(n.OT)
 
@@ -128,12 +157,6 @@ func ImportModern(n *Neutral, format modern.Format, slot Slot) (*modern.Pokemon,
 	}
 	if n.HasBall && n.Ball > 0 {
 		p.SetBall(n.Ball)
-	}
-	for i := 0; i < 4; i++ {
-		if n.Moves[i] != 0 && n.Moves[i] > MaxMoveID[gen] {
-			losses.add(fmt.Sprintf("move %d", i+1), fmt.Sprintf("the move does not exist in Generation %d", gen))
-			p.SetMoves(moveWithSlotCleared(p.GetMoves(), i))
-		}
 	}
 
 	p.Refresh()
@@ -156,9 +179,4 @@ func ImportModern(n *Neutral, format modern.Format, slot Slot) (*modern.Pokemon,
 	}
 	losses.add("friendship, Pokérus, met data and language", "not carried across generations by this converter")
 	return out, losses, nil
-}
-
-func moveWithSlotCleared(moves [4]uint16, slot int) [4]uint16 {
-	moves[slot] = 0
-	return moves
 }

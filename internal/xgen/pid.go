@@ -105,6 +105,29 @@ func dvForGender(national uint16, want, atkDV byte) (byte, bool) {
 	return atkDV, false
 }
 
+// capEVs enforces a generation's per-stat and total EV limits. When the total
+// is above the cap every stat is scaled down proportionally, which preserves
+// the distribution rather than zeroing whatever came last.
+func capEVs(evs [6]uint16, perStat, total uint16) ([6]uint16, bool) {
+	out := evs
+	changed := false
+	sum := 0
+	for i := range out {
+		if out[i] > perStat {
+			out[i] = perStat
+			changed = true
+		}
+		sum += int(out[i])
+	}
+	if sum > int(total) {
+		changed = true
+		for i := range out {
+			out[i] = uint16(int(out[i]) * int(total) / sum)
+		}
+	}
+	return out, changed
+}
+
 // isShiny reports whether a Gen 3+ personality and trainer id form a shiny.
 func isShiny(tid, sid uint16, pid uint32) bool {
 	value := tid ^ sid ^ uint16(pid>>16) ^ uint16(pid)
@@ -120,6 +143,52 @@ func sidForShiny(tid uint16, pid uint32) uint16 {
 // sidForNotShiny returns the Secret ID that makes the personality non-shiny.
 func sidForNotShiny(tid uint16, pid uint32) uint16 {
 	return sidForShiny(tid, pid) ^ 0xFFFF
+}
+
+// gen2ShinyAtkFor picks a shiny-pattern Attack DV nearest to atk that also
+// produces the wanted gender when possible. The shiny pattern constrains the
+// Attack DV to {2,3,6,7,10,11,14,15}.
+func gen2ShinyAtkFor(national uint16, want, atk byte) (byte, bool) {
+	const maxScore = int(^uint(0) >> 1)
+	best := byte(2)
+	bestScore, matched := maxScore, false
+	for _, candidate := range []byte{2, 3, 6, 7, 10, 11, 14, 15} {
+		score := absInt(int(candidate)-int(atk)) * 2
+		if genderFromDV(national, candidate) == want {
+			matched = true
+		} else {
+			score += 100
+		}
+		if score < bestScore {
+			bestScore, best = score, candidate
+		}
+	}
+	return best, matched
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+// nonShinyAtk returns an Attack DV close to atk that is outside the shiny set,
+// so a non-shiny Pokémon does not become shiny by accident.
+func nonShinyAtk(atk byte) (byte, bool) {
+	shiny := map[byte]bool{2: true, 3: true, 6: true, 7: true, 10: true, 11: true, 14: true, 15: true}
+	if !shiny[atk] {
+		return atk, false
+	}
+	for d := 1; d < 16; d++ {
+		if int(atk)-d >= 0 && !shiny[byte(int(atk)-d)] {
+			return byte(int(atk) - d), true
+		}
+		if int(atk)+d <= 15 && !shiny[byte(int(atk)+d)] {
+			return byte(int(atk) + d), true
+		}
+	}
+	return atk, false
 }
 
 // gen2Shiny reports whether the DVs match the Gen 2 shiny pattern.

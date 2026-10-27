@@ -1,5 +1,10 @@
 package xgen
 
+import (
+	"sort"
+	"strings"
+)
+
 // ItemIDGen2 maps item names to Gen 2 (GSC) IDs.
 var ItemIDGen2 = map[string]uint16{
 	"Amulet Coin":   91,
@@ -2977,8 +2982,74 @@ func TranslateItem(srcGen, dstGen int, srcItemID uint16) (uint16, bool) {
 	if name == "" {
 		return 0, false
 	}
-	dstID := GetItemID(dstGen, name)
+	dstID := itemIndex(dstGen)[normalizeItemName(name)]
 	return dstID, dstID != 0
+}
+
+// normalizeItemName folds the spelling differences between the generation
+// tables ("King's Rock" vs "King’s Rock", "NeverMeltIce" vs "Never-Melt Ice"),
+// so translation survives the differing punctuation.
+func normalizeItemName(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(name) {
+		switch r {
+		case ' ', '-', '.', '\'', '\u2019', '\u2018', '_', ':':
+			// punctuation never distinguishes an item
+		case '\u00e9':
+			b.WriteByte('e')
+		case '\u2640':
+			b.WriteByte('f')
+		case '\u2642':
+			b.WriteByte('m')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// The normalised indexes are built once at start-up and then read-only, so
+// concurrent conversions (the mobile bridge) never race.
+var (
+	itemIndexGen2     map[string]uint16
+	itemIndexGen3     map[string]uint16
+	itemIndexGen4Plus map[string]uint16
+)
+
+func init() {
+	itemIndexGen2 = buildItemIndex(ItemIDGen2)
+	itemIndexGen3 = buildItemIndex(ItemIDGen3)
+	itemIndexGen4Plus = buildItemIndex(ItemIDGen4Plus)
+}
+
+func itemIndex(gen int) map[string]uint16 {
+	switch {
+	case gen == 2:
+		return itemIndexGen2
+	case gen == 3:
+		return itemIndexGen3
+	case gen >= 4:
+		return itemIndexGen4Plus
+	default:
+		return nil // Generation I has no held items
+	}
+}
+
+func buildItemIndex(table map[string]uint16) map[string]uint16 {
+	names := make([]string, 0, len(table))
+	for name := range table {
+		names = append(names, name)
+	}
+	// Sort so duplicate normalised keys resolve deterministically.
+	sort.Strings(names)
+	index := make(map[string]uint16, len(table))
+	for _, name := range names {
+		key := normalizeItemName(name)
+		if _, exists := index[key]; !exists {
+			index[key] = table[name]
+		}
+	}
+	return index
 }
 
 func findItemName(gen int, id uint16) string {

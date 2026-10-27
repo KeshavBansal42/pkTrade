@@ -374,13 +374,10 @@ func (p *Pokemon) partyStats() ([6]uint16, error) {
 		calc(base.SpD, int(iv[5]), int(ev[5]), false),
 	}
 	if up != down {
-		// 0=Atk, 1=Def, 2=Spe, 3=SpA, 4=SpD
-		if up != 0 {
-			stats[up] = stats[up] * 110 / 100
-		}
-		if down != 0 {
-			stats[down] = stats[down] * 90 / 100
-		}
+		// The nature index is 0=Atk, 1=Def, 2=Spe, 3=SpA, 4=SpD, while the
+		// stats array also holds HP at index 0, so shift by one.
+		stats[up+1] = stats[up+1] * 110 / 100
+		stats[down+1] = stats[down+1] * 90 / 100
 	}
 	var out [6]uint16
 	for i, v := range stats {

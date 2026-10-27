@@ -83,11 +83,13 @@ func ImportGen2(n *Neutral, slot Slot) (*gen2.Pokemon, Losses, error) {
 			losses.add("held item", "the item does not exist in Generation II")
 		}
 	}
+	pp := n.MovePP
 	for i := 0; i < 4; i++ {
 		move := n.Moves[i]
 		if move != 0 && move > 251 {
 			losses.add(fmt.Sprintf("move %d", i+1), "the move does not exist in Generation II")
 			move = 0
+			pp[i] = 0
 		}
 		body[0x02+i] = byte(move)
 	}
@@ -125,11 +127,20 @@ func ImportGen2(n *Neutral, slot Slot) (*gen2.Pokemon, Losses, error) {
 	}
 	dvs := uint16(atk) | uint16(def)<<4 | uint16(spe)<<8 | uint16(spcDV)<<12
 	if n.Shiny {
-		dvs = uint16(gen2ShinyAtk(atk)) | 10<<4 | 10<<8 | 10<<12
+		shinyAtk, genderKept := gen2ShinyAtkFor(n.Species, n.Gender, atk)
+		dvs = uint16(shinyAtk) | 10<<4 | 10<<8 | 10<<12
 		losses.add("shiny", "the shiny DV pattern replaced the source IVs to keep the Pokémon shiny")
+		if !genderKept {
+			losses.add("gender", "the shiny DV pattern could not also keep the gender")
+		}
+	} else if gen2Shiny(dvs) {
+		if safe, changed := nonShinyAtk(atk); changed {
+			dvs = uint16(safe) | uint16(def)<<4 | uint16(spe)<<8 | uint16(spcDV)<<12
+			losses.add("shiny", "the Attack DV was nudged so a non-shiny Pokémon does not turn shiny")
+		}
 	}
 	binary.BigEndian.PutUint16(body[0x15:], dvs)
-	copy(body[0x17:0x1B], n.MovePP[:])
+	copy(body[0x17:0x1B], pp[:])
 	if n.HasFriendship {
 		body[0x1B] = n.Friendship
 	} else {
@@ -158,14 +169,4 @@ func ImportGen2(n *Neutral, slot Slot) (*gen2.Pokemon, Losses, error) {
 	}
 	reportAbsent(&losses, "Generation II", n, "capture ball", "nature", "ability", "met data", "Secret ID")
 	return p, losses, nil
-}
-
-// gen2ShinyAtk picks a shiny-pattern Attack DV near the source value.
-func gen2ShinyAtk(atk byte) byte {
-	for _, candidate := range []byte{2, 3, 6, 7, 10, 11, 14, 15} {
-		if candidate >= atk {
-			return candidate
-		}
-	}
-	return 15
 }

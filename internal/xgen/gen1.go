@@ -77,11 +77,13 @@ func ImportGen1(n *Neutral, slot Slot) (*gen1.Pokemon, Losses, error) {
 	body[0x06] = types[1]
 	body[0x07] = pokemon.CatchRateGen1[n.Species]
 
+	pp := n.MovePP
 	for i := 0; i < 4; i++ {
 		move := n.Moves[i]
 		if move != 0 && move > 165 {
 			losses.add(fmt.Sprintf("move %d", i+1), "the move does not exist in Generation I")
 			move = 0
+			pp[i] = 0
 		}
 		body[0x08+i] = byte(move)
 	}
@@ -120,7 +122,10 @@ func ImportGen1(n *Neutral, slot Slot) (*gen1.Pokemon, Losses, error) {
 	}
 	dvs := uint16(atk) | uint16(def)<<4 | uint16(spe)<<8 | uint16(spcDV)<<12
 	binary.BigEndian.PutUint16(body[0x1B:], dvs)
-	copy(body[0x1D:0x21], n.MovePP[:])
+	if n.Shiny {
+		losses.add("shiny", "Generation I has no shiny flag")
+	}
+	copy(body[0x1D:0x21], pp[:])
 
 	nick := gen1.EncodeString(n.Nick, gen1.NameLength)
 	ot := gen1.EncodeString(n.OT, gen1.NameLength)
