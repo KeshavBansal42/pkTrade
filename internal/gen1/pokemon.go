@@ -230,6 +230,12 @@ var gen1Charset = func() map[byte]string {
 	return m
 }()
 
+// DecodeString converts a Generation I name field to text.
+func DecodeString(data []byte) string { return decodeGen1String(data) }
+
+// EncodeString converts text to a Generation I name field of the given width.
+func EncodeString(value string, length int) []byte { return encodeGen1String(value, length) }
+
 func decodeGen1String(data []byte) string {
 	var b strings.Builder
 	for _, c := range data {

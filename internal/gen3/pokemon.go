@@ -34,6 +34,16 @@ type Pokemon struct {
 	EVs    [6]byte // HP, Atk, Def, Spe, SpA, SpD
 	Nature byte
 
+	PPUps       byte // packed PP-Up bonuses, two bits per move slot
+	Friendship  byte
+	Pokerus     byte
+	MetLocation byte
+	MetLevel    byte
+	OriginGame  byte
+	OTGender    byte
+	AbilitySlot byte
+	IsEgg       bool
+
 	ChecksumValid bool
 	BoxNum        int
 	BoxSlot       int
@@ -108,8 +118,18 @@ func ParsePokemon(data []byte) (*Pokemon, error) {
 	}
 	p.EVs = [6]byte{blocks.evs[0], blocks.evs[1], blocks.evs[2], blocks.evs[3], blocks.evs[4], blocks.evs[5]}
 
+	p.PPUps = blocks.growth[8]
+	p.Friendship = blocks.growth[9]
+	p.Pokerus = blocks.misc[0]
+	p.MetLocation = blocks.misc[1]
+	p.AbilitySlot = byte((ivRaw >> 31) & 1)
+	p.IsEgg = (ivRaw>>30)&1 == 1
+
 	if p.ChecksumValid {
 		originsInfo := binary.LittleEndian.Uint16(blocks.misc[2:4])
+		p.MetLevel = byte(originsInfo & 0x7F)
+		p.OTGender = byte((originsInfo >> 7) & 1)
+		p.OriginGame = byte((originsInfo >> 8) & 0x0F)
 		ballID := byte((originsInfo >> 11) & 0x0F)
 		if ballID >= 1 && ballID <= 12 {
 			p.BallID = ballID
@@ -228,6 +248,101 @@ func (p *Pokemon) ToBoxData() ([]byte, error) {
 	return append([]byte(nil), p.RawData[:80]...), nil
 }
 
+// Encode builds a fresh 80- or 100-byte record from the struct's fields: it
+// lays the four substructures out in the order implied by the personality
+// value, writes the record checksum and encrypts the data block. A party
+// record also carries the level and reconstructed stats.
+func (p *Pokemon) Encode(size int) ([]byte, error) {
+	if size != 80 && size != 100 {
+		return nil, fmt.Errorf("gen 3 record must be 80 or 100 bytes, got %d", size)
+	}
+	raw := make([]byte, size)
+	binary.LittleEndian.PutUint32(raw[0x00:], p.PersonalityValue)
+	binary.LittleEndian.PutUint32(raw[0x04:], p.OTID)
+	copy(raw[0x08:0x12], EncodeGen3String(p.Nickname, 10))
+	raw[0x12] = p.Language
+	raw[0x13] = p.Flags
+	copy(raw[0x14:0x1B], EncodeGen3String(p.OTName, 7))
+	raw[0x1B] = p.Markings
+
+	key := p.PersonalityValue ^ p.OTID
+	decrypted := make([]byte, 48)
+	order := subStructOrder[p.PersonalityValue%24]
+	b := &dataBlocks{decrypted: decrypted, key: key, order: [4]byte{order[0], order[1], order[2], order[3]}}
+	for i, block := range order {
+		blockData := decrypted[i*12 : i*12+12]
+		switch block {
+		case 'G':
+			b.growth = blockData
+		case 'A':
+			b.attacks = blockData
+		case 'E':
+			b.evs = blockData
+		case 'M':
+			b.misc = blockData
+		}
+	}
+	if b.growth == nil || b.attacks == nil || b.evs == nil || b.misc == nil {
+		return nil, fmt.Errorf("gen 3 record has an invalid substructure order")
+	}
+	binary.LittleEndian.PutUint16(b.growth[0:2], p.Species)
+	binary.LittleEndian.PutUint16(b.growth[2:4], p.HeldItem)
+	binary.LittleEndian.PutUint32(b.growth[4:8], p.Experience)
+	b.growth[8] = p.PPUps
+	b.growth[9] = p.Friendship
+	for i := 0; i < 4; i++ {
+		binary.LittleEndian.PutUint16(b.attacks[i*2:], p.Moves[i])
+		b.attacks[8+i] = p.PP[i]
+	}
+	copy(b.evs, p.EVs[:])
+	b.misc[0] = p.Pokerus
+	b.misc[1] = p.MetLocation
+	origins := uint16(p.MetLevel) |
+		uint16(p.OTGender&1)<<7 |
+		uint16(p.OriginGame&0x0F)<<8 |
+		uint16(p.BallID&0x0F)<<11
+	binary.LittleEndian.PutUint16(b.misc[2:4], origins)
+	ivWord := uint32(p.IVs[0]&0x1F) |
+		uint32(p.IVs[1]&0x1F)<<5 |
+		uint32(p.IVs[2]&0x1F)<<10 |
+		uint32(p.IVs[3]&0x1F)<<15 |
+		uint32(p.IVs[4]&0x1F)<<20 |
+		uint32(p.IVs[5]&0x1F)<<25
+	if p.IsEgg {
+		ivWord |= 1 << 30
+	}
+	if p.AbilitySlot&1 == 1 {
+		ivWord |= 1 << 31
+	}
+	binary.LittleEndian.PutUint32(b.misc[4:8], ivWord)
+
+	p.RawData = raw
+	p.writeBlocks(b)
+	p.DataChecksum = p.calculateChecksum(decrypted)
+	p.ChecksumValid = true
+
+	if p.National != 0 && int(p.National) < len(pokemon.Growth3) {
+		p.Level = pokemon.LevelFromExp(pokemon.Growth3[p.National], p.Experience)
+	}
+	if size == 100 {
+		stats, err := p.partyStats()
+		if err != nil {
+			return nil, err
+		}
+		raw[0x50] = 0
+		raw[0x54] = p.Level
+		raw[0x55] = 0
+		binary.LittleEndian.PutUint16(raw[0x56:], stats[0])
+		binary.LittleEndian.PutUint16(raw[0x58:], stats[0])
+		binary.LittleEndian.PutUint16(raw[0x5A:], stats[1])
+		binary.LittleEndian.PutUint16(raw[0x5C:], stats[2])
+		binary.LittleEndian.PutUint16(raw[0x5E:], stats[3])
+		binary.LittleEndian.PutUint16(raw[0x60:], stats[4])
+		binary.LittleEndian.PutUint16(raw[0x62:], stats[5])
+	}
+	return append([]byte(nil), raw...), nil
+}
+
 // partyStats returns HP, Atk, Def, Spe, SpA, SpD using Gen 3's stat formula.
 func (p *Pokemon) partyStats() ([6]uint16, error) {
 	if p.National == 0 || int(p.National) >= len(pokemon.BaseStats3) {
@@ -336,6 +451,9 @@ func (p *Pokemon) TradeBlockReason() string {
 	if p.Species == 0 {
 		return "the record has no species"
 	}
+	if p.National == 0 {
+		return "the record's species has no National Dex mapping"
+	}
 	if p.Flags&0x04 != 0 {
 		return "eggs cannot be traded"
 	}
@@ -348,3 +466,6 @@ func (p *Pokemon) TradeBlockReason() string {
 // NationalID returns the National Dex number, or 0 when the internal species
 // ID has no National Dex mapping.
 func (p *Pokemon) NationalID() uint16 { return p.National }
+
+// DecodeGen3String converts a Gen 3 name field to text.
+func DecodeGen3String(data []byte) string { return decodeGen3String(data) }

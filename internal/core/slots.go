@@ -124,6 +124,7 @@ type Capabilities struct {
 	Boxes     bool `json:"boxes"`
 	Evolution bool `json:"evolution"`
 	Dex       bool `json:"dex"`
+	CrossGen  bool `json:"crossGen"`
 }
 
 // Evolution describes one evolution performed during a trade.

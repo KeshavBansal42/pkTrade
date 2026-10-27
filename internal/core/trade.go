@@ -59,12 +59,13 @@ func validateSave(save SaveFile) error {
 	return nil
 }
 
-func slotsEqual(a, b []byte) bool {
-	return bytes.Equal(a, b)
-}
-
 // PreviewTrade checks whether two loaded saves can exchange the selected
 // slots. It is deliberately side-effect free: no save bytes are modified.
+//
+// Two saves of the same generation must use the exact same format and trade
+// byte-for-byte, losslessly. Two saves of different generations are traded
+// through the record converter: each selected record is rebuilt in the other
+// save's format, and anything the destination cannot keep is listed in Losses.
 func PreviewTrade(saveA, saveB SaveFile, refA, refB SlotRef) *TradePreview {
 	if err := refA.Validate(); err != nil {
 		return unsupported("Save A slot is invalid: %v", err)
@@ -87,14 +88,24 @@ func PreviewTrade(saveA, saveB SaveFile, refA, refB SlotRef) *TradePreview {
 	if err != nil {
 		return unsupported("%v", err)
 	}
-	if keyA != keyB {
+	sameGen := keyA.Generation == keyB.Generation
+	if sameGen {
+		if keyA != keyB {
+			infoA, infoB := infoOf(saveA), infoOf(saveB)
+			return unsupported(
+				"These saves are not compatible: %s (%s) cannot trade with %s (%s). "+
+					"Trades require the same generation and the same save format; "+
+					"for example FireRed/LeafGreen, Ruby/Sapphire/Emerald, and "+
+					"Diamond/Pearl/Platinum/HeartGold/SoulSilver are separate formats.",
+				infoA.Game, infoA.Family, infoB.Game, infoB.Family,
+			)
+		}
+	} else if !converterAvailable() {
 		infoA, infoB := infoOf(saveA), infoOf(saveB)
 		return unsupported(
-			"These saves are not compatible: %s (%s) cannot trade with %s (%s). "+
-				"Trades require the same generation and the same save format; "+
-				"for example FireRed/LeafGreen, Ruby/Sapphire/Emerald, and "+
-				"Diamond/Pearl/Platinum/HeartGold/SoulSilver are separate formats.",
-			infoA.Game, infoA.Family, infoB.Game, infoB.Family,
+			"These saves are of different generations (%s, Gen %d and %s, Gen %d) and "+
+				"cross-generation transfers are not available.",
+			infoA.Game, infoA.Generation, infoB.Game, infoB.Generation,
 		)
 	}
 
@@ -154,26 +165,70 @@ func PreviewTrade(saveA, saveB SaveFile, refA, refB SlotRef) *TradePreview {
 		Target:    refB.String(),
 	}
 
-	if hooks, ok := saveA.(TradeHooks); ok {
-		_, evolutions, err := hooks.FixupReceived(pokemonB)
-		if err != nil {
-			return unsupported("Save A cannot receive %s: %v", pokemonB.GetNickname(), err)
+	if sameGen {
+		if hooks, ok := saveA.(TradeHooks); ok {
+			_, evolutions, err := hooks.FixupReceived(pokemonB)
+			if err != nil {
+				return unsupported("Save A cannot receive %s: %v", pokemonB.GetNickname(), err)
+			}
+			preview.Evolutions = append(preview.Evolutions, evolutions...)
 		}
-		preview.Evolutions = append(preview.Evolutions, evolutions...)
-	}
-	if hooks, ok := saveB.(TradeHooks); ok {
-		_, evolutions, err := hooks.FixupReceived(pokemonA)
-		if err != nil {
-			return unsupported("Save B cannot receive %s: %v", pokemonA.GetNickname(), err)
+		if hooks, ok := saveB.(TradeHooks); ok {
+			_, evolutions, err := hooks.FixupReceived(pokemonA)
+			if err != nil {
+				return unsupported("Save B cannot receive %s: %v", pokemonA.GetNickname(), err)
+			}
+			preview.Evolutions = append(preview.Evolutions, evolutions...)
 		}
-		preview.Evolutions = append(preview.Evolutions, evolutions...)
+		preview.Message = fmt.Sprintf(
+			"Ready to exchange Save A %s (%s, Lv. %d) with Save B %s (%s, Lv. %d).",
+			refA, pokemonA.GetNickname(), pokemonA.GetLevel(),
+			refB, pokemonB.GetNickname(), pokemonB.GetLevel(),
+		)
+	} else {
+		toA, lossesA, err := convertRecord(pokemonB, keyB, keyA, refA.Kind)
+		if err != nil {
+			return unsupported("Cannot transfer Save B %s to Save A: %v", refB, err)
+		}
+		toB, lossesB, err := convertRecord(pokemonA, keyA, keyB, refB.Kind)
+		if err != nil {
+			return unsupported("Cannot transfer Save A %s to Save B: %v", refA, err)
+		}
+		if reason := tradeBlockReason(toA); reason != "" {
+			return unsupported("Save A cannot receive %s: %s", refB, reason)
+		}
+		if reason := tradeBlockReason(toB); reason != "" {
+			return unsupported("Save B cannot receive %s: %s", refA, reason)
+		}
+		if hooks, ok := saveA.(TradeHooks); ok {
+			_, evolutions, err := hooks.FixupReceived(toA)
+			if err != nil {
+				return unsupported("Save A cannot receive %s: %v", pokemonB.GetNickname(), err)
+			}
+			preview.Evolutions = append(preview.Evolutions, evolutions...)
+		}
+		if hooks, ok := saveB.(TradeHooks); ok {
+			_, evolutions, err := hooks.FixupReceived(toB)
+			if err != nil {
+				return unsupported("Save B cannot receive %s: %v", pokemonA.GetNickname(), err)
+			}
+			preview.Evolutions = append(preview.Evolutions, evolutions...)
+		}
+		for _, loss := range lossesA {
+			preview.Losses = append(preview.Losses, fmt.Sprintf("Into Save A (Gen %d): %s", saveA.Generation(), loss))
+		}
+		for _, loss := range lossesB {
+			preview.Losses = append(preview.Losses, fmt.Sprintf("Into Save B (Gen %d): %s", saveB.Generation(), loss))
+		}
+		preview.Lossy = len(preview.Losses) > 0
+		preview.Message = fmt.Sprintf(
+			"Cross-generation transfer: Save A %s (%s, Lv. %d) exchanges with Save B %s (%s, Lv. %d). "+
+				"Each record is rebuilt in the other game's format; anything the destination cannot keep is listed as data loss.",
+			refA, pokemonA.GetNickname(), pokemonA.GetLevel(),
+			refB, pokemonB.GetNickname(), pokemonB.GetLevel(),
+		)
 	}
 
-	preview.Message = fmt.Sprintf(
-		"Ready to exchange Save A %s (%s, Lv. %d) with Save B %s (%s, Lv. %d).",
-		refA, pokemonA.GetNickname(), pokemonA.GetLevel(),
-		refB, pokemonB.GetNickname(), pokemonB.GetLevel(),
-	)
 	if len(preview.Evolutions) > 0 {
 		names := make([]string, 0, len(preview.Evolutions))
 		for _, evo := range preview.Evolutions {
@@ -242,6 +297,10 @@ func ExecuteTrade(saveA, saveB SaveFile, refA, refB SlotRef) (*TradeResult, erro
 		return nil, fmt.Errorf("%s", preview.Message)
 	}
 
+	keyA, _ := compatibilityOf(saveA)
+	keyB, _ := compatibilityOf(saveB)
+	crossGen := keyA.Generation != keyB.Generation
+
 	originalA := append([]byte(nil), saveA.WriteToBytes()...)
 	originalB := append([]byte(nil), saveB.WriteToBytes()...)
 
@@ -255,17 +314,30 @@ func ExecuteTrade(saveA, saveB SaveFile, refA, refB SlotRef) (*TradeResult, erro
 		return nil, fmt.Errorf("failed to read Save B %s: %w", refB, err)
 	}
 
-	incomingToA, incomingToB := pokemonB, pokemonA
+	var incomingToA, incomingToB Pokemon
+	if crossGen {
+		incomingToA, _, err = convertRecord(pokemonB, keyB, keyA, refA.Kind)
+		if err != nil {
+			return nil, fmt.Errorf("Save A cannot receive %s: %w", pokemonB.GetNickname(), err)
+		}
+		incomingToB, _, err = convertRecord(pokemonA, keyA, keyB, refB.Kind)
+		if err != nil {
+			return nil, fmt.Errorf("Save B cannot receive %s: %w", pokemonA.GetNickname(), err)
+		}
+	} else {
+		incomingToA, incomingToB = pokemonB, pokemonA
+	}
+
 	var evolutions []Evolution
 	if hooks, ok := saveA.(TradeHooks); ok {
-		incomingToA, evolutions, err = hooks.FixupReceived(pokemonB)
+		incomingToA, evolutions, err = hooks.FixupReceived(incomingToA)
 		if err != nil {
 			return nil, fmt.Errorf("Save A cannot receive %s: %w", pokemonB.GetNickname(), err)
 		}
 	}
 	var evolutionsB []Evolution
 	if hooks, ok := saveB.(TradeHooks); ok {
-		incomingToB, evolutionsB, err = hooks.FixupReceived(pokemonA)
+		incomingToB, evolutionsB, err = hooks.FixupReceived(incomingToB)
 		if err != nil {
 			return nil, fmt.Errorf("Save B cannot receive %s: %w", pokemonA.GetNickname(), err)
 		}
@@ -310,11 +382,14 @@ func ExecuteTrade(saveA, saveB SaveFile, refA, refB SlotRef) (*TradeResult, erro
 		return nil, fmt.Errorf("Save B output verification failed: %w", err)
 	}
 
+	warnings := append([]string(nil), preview.Warnings...)
+	warnings = append(warnings, preview.Losses...)
+
 	return &TradeResult{
 		SaveA:      append([]byte(nil), writtenA...),
 		SaveB:      append([]byte(nil), writtenB...),
 		Evolutions: evolutions,
-		Warnings:   preview.Warnings,
+		Warnings:   warnings,
 	}, nil
 }
 

@@ -18,10 +18,11 @@ import (
 	_ "pktrade/internal/gen6"
 	_ "pktrade/internal/gen7"
 	_ "pktrade/internal/gen8"
+	_ "pktrade/internal/xgen"
 )
 
 func usage() {
-	fmt.Print(`pktrade - same-generation Pokémon save trading
+	fmt.Print(`pktrade - Pokémon save trading
 
 Usage:
   pktrade list <save> [<save> ...]
@@ -32,9 +33,12 @@ Slots:
   party:N       party slot N (1-6)
   box:B/S       box B, slot S (1-based)
 
-Trades are only allowed between saves of the same generation and the same
-save format. Output files are written to ./out; input files are never
-modified. A verified backup is created before writing.
+Two saves of the same generation and format exchange Pokémon losslessly.
+Two saves of different generations convert each Pokémon into the other game's
+format; anything the destination cannot keep is listed as data loss, and
+'preview' shows the losses before anything is written. Output files are
+written to ./out; input files are never modified. A verified backup is
+created before writing.
 
 Examples:
   pktrade list firered.sav
@@ -200,6 +204,12 @@ func printPreview(preview *core.TradePreview) error {
 	}
 	for _, warning := range preview.Warnings {
 		fmt.Println("Warning:", warning)
+	}
+	for _, loss := range preview.Losses {
+		fmt.Println("Data loss:", loss)
+	}
+	if preview.Lossy {
+		fmt.Println("This transfer is lossy; it is applied only after confirmation.")
 	}
 	if !preview.Supported {
 		return fmt.Errorf("trade is not supported")

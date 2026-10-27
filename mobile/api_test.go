@@ -236,15 +236,39 @@ func TestPerformTradeSupportsGen1SameGeneration(t *testing.T) {
 	}
 }
 
-func TestPreviewTradeBlocksCrossGeneration(t *testing.T) {
+func TestPreviewTradeSupportsCrossGeneration(t *testing.T) {
 	gen1 := gen1SaveForMobile(gen1RecordForMobile(0x99, 5))
 	gen3 := saveWithParty(makeRecord(1, 4))
 	preview := PreviewTrade(gen1, gen3, 1, 1)
-	if preview.Supported {
-		t.Fatal("cross-generation preview must not be runnable")
+	if !preview.Supported {
+		t.Fatalf("cross-generation preview should be runnable: %s", preview.Message)
+	}
+	if !preview.Lossy || len(preview.Losses) == 0 {
+		t.Fatalf("a cross-generation transfer must list its losses: %+v", preview)
 	}
 	if preview.Message == "" {
-		t.Fatal("cross-generation preview should explain why it is blocked")
+		t.Fatal("cross-generation preview should describe the transfer")
+	}
+}
+
+func TestPerformTradeCrossGeneration(t *testing.T) {
+	gen1 := gen1SaveForMobile(gen1RecordForMobile(0x99, 5))
+	gen3 := saveWithParty(makeRecord(1, 4))
+	result, err := PerformTrade(gen1, gen3, 1, 1)
+	if err != nil {
+		t.Fatalf("cross-generation trade failed: %v", err)
+	}
+	fileA, err := core.LoadSaveFromBytes(result.SaveA)
+	if err != nil {
+		t.Fatalf("traded Gen 1 save A no longer parses: %v", err)
+	}
+	partyA, err := fileA.GetParty()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Save A receives the Gen 3 record, whose National Dex species is 25.
+	if partyA[0].GetSpecies() == 0 {
+		t.Fatal("save A did not receive a record")
 	}
 }
 

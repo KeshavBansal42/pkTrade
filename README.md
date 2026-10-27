@@ -1,11 +1,13 @@
 # pkTrade
 
-pkTrade trades Pokémon between two save files. Trades are **same generation
-only**: two saves may only exchange Pokémon when they use the same generation
-*and* the same save format family. FireRed and LeafGreen are different
-formats, so are Ruby/Sapphire and Emerald, and so are Diamond/Pearl and
-HeartGold/SoulSilver. A trade between incompatible saves is refused before
-anything is written.
+pkTrade trades Pokémon between two save files. Two saves of the **same
+generation and format family** exchange records byte-for-byte and losslessly.
+FireRed/LeafGreen, Ruby/Sapphire/Emerald, and Diamond/Pearl/HeartGold/SoulSilver
+are separate formats. Two saves of **different generations** (Gen 1 through
+Gen 8) are exchanged by converting each record into the other game's format;
+anything the destination cannot represent is reported as an explicit data loss
+in the preview, and the user accepts it before anything is written. A trade
+between incompatible saves is refused before anything is written.
 
 Every supported generation can trade in the party **and** in the boxes.
 
@@ -46,6 +48,35 @@ Notes:
   so a Sword/Shield dex is left untouched instead of being written with a
   guessed offset.
 * Eggs, records with a broken checksum and empty slots are refused.
+
+## Cross-generation transfers
+
+Two saves of different generations exchange Pokémon through a neutral record
+that both formats are decoded into and encoded from. The converter preserves
+everything the destination can represent and lists the rest as losses:
+
+* **Species** is carried by National Dex number. A species that does not exist
+  in the destination generation blocks the transfer.
+* **Level** is recomputed from the experience and the destination growth rate.
+* **IVs and DVs** are converted both ways (`DV = IV >> 1`); the Gen 1/2 Special
+  stat is shared and the low bit of each stat is lost when moving back.
+* **EVs and stat experience** are converted so the destination contributes the
+  same stat, and are clamped to the destination cap.
+* **Personality, nature, gender, shininess and ability** ride on the personality
+  value when both generations have one. Coming from Gen 1/2 a personality value
+  is built to match the nature, gender and shininess, and a Secret ID is
+  invented; going back to Gen 1/2 the gender and shininess are encoded into the
+  DVs.
+* **Moves and PP** keep their ids (they have been stable since Gen 1) and are
+  dropped only when the move does not exist in the destination. **Held items**
+  are remapped by name and dropped when absent. **Capture balls** survive where
+  the destination stores them.
+* **Nickname and OT name** are re-encoded into the destination charset and
+  truncated to its field width.
+
+Eggs and unrepresentable species are always blocked, never silently altered.
+Every dropped or changed field appears in the preview's loss list (the app's
+`ACCEPT DATA LOSS` button).
 
 ## Trade evolutions
 
@@ -121,9 +152,10 @@ to it over the `com.pktrade/bridge` method channel.
 | `PerformSlotTrade(a, b, slotA, slotB)` | Party or box trade, returns both rewritten saves |
 
 The JSON contract never changed: `supported`, `lossy`, `message` and `losses`
-keep their lower-camel-case names, `lossy` is always `false` and `losses` is
-always empty. `supported` is the only field a caller may use to decide whether
-a trade is safe.
+keep their lower-camel-case names. For a same-generation trade `lossy` is
+`false` and `losses` is empty; a cross-generation transfer sets `lossy` and
+lists every field the destination cannot keep. `supported` remains the only
+field a caller may use to decide whether a trade can run.
 
 The app reaches the boxes through `ListSlotsJSON`: the storage screen lists
 every box of a save, and the slot reference of the chosen Pokémon (`party:3`,

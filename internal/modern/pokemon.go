@@ -36,6 +36,10 @@ type Format struct {
 	EV      [6]int // HP, Atk, Def, Spe, SpA, SpD
 	IV      int
 
+	Move     int
+	MovePP   int
+	MovePPUp int
+
 	Nickname    int
 	NicknameLen int
 	OT          int
@@ -61,6 +65,7 @@ var (
 		Generation: 4, Kind: Kind45, StoredSize: 136, PartySize: 236, BlockSize: 32,
 		Species: 0x08, Item: 0x0A, ID32: 0x0C, Exp: 0x10, PID: 0x00, Nature: -1,
 		EV: [6]int{0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D}, IV: 0x38,
+		Move: 0x28, MovePP: 0x30, MovePPUp: 0x34,
 		Nickname: 0x48, NicknameLen: 22, OT: 0x68, OTLen: 16,
 		BallOffset: 0x83,
 		Level:      0x8C, HP: 0x8E, MaxHP: 0x90, Atk: 0x92, Def: 0x94, Spe: 0x96, SpA: 0x98, SpD: 0x9A,
@@ -73,6 +78,7 @@ var (
 		Generation: 4, Kind: Kind45, StoredSize: 136, PartySize: 236, BlockSize: 32,
 		Species: 0x08, Item: 0x0A, ID32: 0x0C, Exp: 0x10, PID: 0x00, Nature: -1,
 		EV: [6]int{0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D}, IV: 0x38,
+		Move: 0x28, MovePP: 0x30, MovePPUp: 0x34,
 		Nickname: 0x48, NicknameLen: 22, OT: 0x68, OTLen: 16,
 		BallOffset: 0x86,
 		Level:      0x8C, HP: 0x8E, MaxHP: 0x90, Atk: 0x92, Def: 0x94, Spe: 0x96, SpA: 0x98, SpD: 0x9A,
@@ -82,6 +88,7 @@ var (
 		Generation: 5, Kind: Kind45, StoredSize: 136, PartySize: 220, BlockSize: 32,
 		Species: 0x08, Item: 0x0A, ID32: 0x0C, Exp: 0x10, PID: 0x00, Nature: 0x41,
 		EV: [6]int{0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D}, IV: 0x38,
+		Move: 0x28, MovePP: 0x30, MovePPUp: 0x34,
 		Nickname: 0x48, NicknameLen: 22, OT: 0x68, OTLen: 16,
 		BallOffset: 0x83,
 		Level:      0x8C, HP: 0x8E, MaxHP: 0x90, Atk: 0x92, Def: 0x94, Spe: 0x96, SpA: 0x98, SpD: 0x9A,
@@ -91,6 +98,7 @@ var (
 		Generation: 6, Kind: Kind67, StoredSize: 0xE8, PartySize: 0x104, BlockSize: 56,
 		Species: 0x08, Item: 0x0A, ID32: 0x0C, Exp: 0x10, PID: 0x18, Nature: 0x1C,
 		EV: [6]int{0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23}, IV: 0x74,
+		Move: 0x5A, MovePP: 0x62, MovePPUp: 0x66,
 		Nickname: 0x40, NicknameLen: 26, OT: 0xB0, OTLen: 26,
 		BallOffset: 0xDC,
 		Level:      0xEC, HP: 0xF0, MaxHP: 0xF2, Atk: 0xF4, Def: 0xF6, Spe: 0xF8, SpA: 0xFA, SpD: 0xFC,
@@ -100,6 +108,7 @@ var (
 		Generation: 7, Kind: Kind67, StoredSize: 0xE8, PartySize: 0x104, BlockSize: 56,
 		Species: 0x08, Item: 0x0A, ID32: 0x0C, Exp: 0x10, PID: 0x18, Nature: 0x1C,
 		EV: [6]int{0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23}, IV: 0x74,
+		Move: 0x5A, MovePP: 0x62, MovePPUp: 0x66,
 		Nickname: 0x40, NicknameLen: 26, OT: 0xB0, OTLen: 26,
 		BallOffset: 0xDC,
 		Level:      0xEC, HP: 0xF0, MaxHP: 0xF2, Atk: 0xF4, Def: 0xF6, Spe: 0xF8, SpA: 0xFA, SpD: 0xFC,
@@ -109,6 +118,7 @@ var (
 		Generation: 8, Kind: Kind8, StoredSize: 0x148, PartySize: 0x158, BlockSize: 80,
 		Species: 0x08, Item: 0x0A, ID32: 0x0C, Exp: 0x10, PID: 0x1C, Nature: 0x20,
 		EV: [6]int{0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B}, IV: 0x8C,
+		Move: 0x72, MovePP: 0x7A, MovePPUp: 0x7E,
 		Nickname: 0x58, NicknameLen: 26, OT: 0xF8, OTLen: 26,
 		BallOffset: 0x124,
 		Level:      0x148, HP: 0x14A, MaxHP: 0x14C, Atk: 0x14E, Def: 0x150, Spe: 0x152, SpA: 0x154, SpD: 0x156,
@@ -210,7 +220,7 @@ func (p *Pokemon) refresh() {
 	}
 	iv := binary.LittleEndian.Uint32(d[f.IV:])
 	p.IsEgg = (iv>>30)&1 == 1
-	if len(d) >= f.Level && f.Level >= 0 {
+	if f.Level > 0 && f.Level < len(d) {
 		p.LevelVal = d[f.Level]
 	}
 	if p.LevelVal < 1 || p.LevelVal > 100 {
@@ -313,19 +323,170 @@ func (p *Pokemon) IsChecksumValid() bool {
 	return checksum16(p.Data[8:p.Format.StoredSize]) == binary.LittleEndian.Uint16(p.Data[6:8])
 }
 func (p *Pokemon) GetMoves() [4]uint16 {
-	// Move offsets differ between generations; these are the common low offsets.
-	off := 0x28
-	if p.Format.Generation >= 6 {
-		off = 0x5A
-	}
-	if p.Format.Generation >= 8 {
-		off = 0x72
-	}
 	out := [4]uint16{}
+	if p.Format.Move <= 0 || p.Format.Move+8 > len(p.Data) {
+		return out
+	}
 	for i := 0; i < 4; i++ {
-		out[i] = binary.LittleEndian.Uint16(p.Data[off+i*2:])
+		out[i] = binary.LittleEndian.Uint16(p.Data[p.Format.Move+i*2:])
 	}
 	return out
+}
+
+// GetPP returns the current PP of each move slot.
+func (p *Pokemon) GetPP() [4]byte {
+	out := [4]byte{}
+	f := p.Format
+	if f.MovePP <= 0 || f.MovePP+4 > len(p.Data) {
+		return out
+	}
+	copy(out[:], p.Data[f.MovePP:f.MovePP+4])
+	return out
+}
+
+// GetPPUp returns the PP-Up count of each move slot.
+func (p *Pokemon) GetPPUp() [4]byte {
+	out := [4]byte{}
+	f := p.Format
+	if f.MovePPUp <= 0 || f.MovePPUp+4 > len(p.Data) {
+		return out
+	}
+	copy(out[:], p.Data[f.MovePPUp:f.MovePPUp+4])
+	return out
+}
+
+// New allocates an empty record of the given format. When party is true the
+// party-sized record (with its stat tail) is allocated.
+func New(format Format, party bool) *Pokemon {
+	size := format.StoredSize
+	if party {
+		size = format.PartySize
+	}
+	return &Pokemon{Format: format, Data: make([]byte, size), Stored: !party}
+}
+
+// Refresh re-reads the cached fields from Data after the bytes were changed
+// directly.
+func (p *Pokemon) Refresh() { p.refresh() }
+
+// SetMoves writes the four move slots.
+func (p *Pokemon) SetMoves(moves [4]uint16) {
+	f := p.Format
+	if f.Move <= 0 || f.Move+8 > len(p.Data) {
+		return
+	}
+	for i := 0; i < 4; i++ {
+		binary.LittleEndian.PutUint16(p.Data[f.Move+i*2:], moves[i])
+	}
+}
+
+// SetPP writes the current PP of each slot.
+func (p *Pokemon) SetPP(pp [4]byte) {
+	f := p.Format
+	if f.MovePP <= 0 || f.MovePP+4 > len(p.Data) {
+		return
+	}
+	copy(p.Data[f.MovePP:f.MovePP+4], pp[:])
+}
+
+// SetPPUp writes the PP-Up count of each slot.
+func (p *Pokemon) SetPPUp(ppup [4]byte) {
+	f := p.Format
+	if f.MovePPUp <= 0 || f.MovePPUp+4 > len(p.Data) {
+		return
+	}
+	copy(p.Data[f.MovePPUp:f.MovePPUp+4], ppup[:])
+}
+
+// SetIVs writes the 5-bit IVs and preserves the egg and ability bits.
+func (p *Pokemon) SetIVs(ivs [6]byte) {
+	f := p.Format
+	word := binary.LittleEndian.Uint32(p.Data[f.IV:])
+	word &^= 0x3FFFFFFF // clear the six 5-bit fields
+	for i := 0; i < 6; i++ {
+		word |= uint32(ivs[i]&0x1F) << (5 * i)
+	}
+	binary.LittleEndian.PutUint32(p.Data[f.IV:], word)
+}
+
+// SetIVFlags sets the egg (bit 30) and ability (bit 31) flags of the IV word.
+func (p *Pokemon) SetIVFlags(isEgg bool, abilitySlot byte) {
+	f := p.Format
+	word := binary.LittleEndian.Uint32(p.Data[f.IV:])
+	word &^= 1 << 30
+	word &^= 1 << 31
+	if isEgg {
+		word |= 1 << 30
+	}
+	if abilitySlot&1 == 1 {
+		word |= 1 << 31
+	}
+	binary.LittleEndian.PutUint32(p.Data[f.IV:], word)
+}
+
+// SetEVs writes the EV bytes, clamped to the 252 cap used from Gen 4 on.
+func (p *Pokemon) SetEVs(evs [6]uint16) {
+	f := p.Format
+	for i := 0; i < 6; i++ {
+		v := evs[i]
+		if v > 252 {
+			v = 252
+		}
+		p.Data[f.EV[i]] = byte(v)
+	}
+}
+
+// SetPID writes the personality value. Gen 4 has no separate nature byte, so a
+// new PID changes the nature automatically.
+func (p *Pokemon) SetPID(pid uint32) {
+	binary.LittleEndian.PutUint32(p.Data[p.Format.PID:], pid)
+	p.PID = pid
+	if p.Format.Nature < 0 {
+		p.NatureVal = byte(pid % 25)
+	}
+}
+
+// SetOTID writes the combined trainer id (TID low, SID high).
+func (p *Pokemon) SetOTID(otid uint32) {
+	binary.LittleEndian.PutUint32(p.Data[p.Format.ID32:], otid)
+	p.OTID = otid
+}
+
+// SetExp writes the experience and keeps LevelVal consistent.
+func (p *Pokemon) SetExp(exp uint32) {
+	binary.LittleEndian.PutUint32(p.Data[p.Format.Exp:], exp)
+	p.Exp = exp
+	p.LevelVal = pokemon.LevelFromExp(p.growth(), exp)
+	if p.Format.Level >= 0 && p.Format.Level < len(p.Data) {
+		p.Data[p.Format.Level] = p.LevelVal
+	}
+}
+
+// SetNature writes the nature byte where the format stores one.
+func (p *Pokemon) SetNature(nature byte) {
+	if p.Format.Nature >= 0 && p.Format.Nature < len(p.Data) {
+		p.Data[p.Format.Nature] = nature
+	}
+	p.NatureVal = nature
+}
+
+// SetNickname writes the nickname field.
+func (p *Pokemon) SetNickname(name string) {
+	copy(p.Data[p.Format.Nickname:p.Format.Nickname+p.Format.NicknameLen], encodeString(p.Format.Generation, name, p.Format.NicknameLen))
+	p.NicknameStr = name
+}
+
+// SetOTName writes the original-trainer name field.
+func (p *Pokemon) SetOTName(name string) {
+	copy(p.Data[p.Format.OT:p.Format.OT+p.Format.OTLen], encodeString(p.Format.Generation, name, p.Format.OTLen))
+	p.OTNameStr = name
+}
+
+// SetBall writes the capture-ball byte.
+func (p *Pokemon) SetBall(ball byte) {
+	if p.Format.BallOffset > 0 && p.Format.BallOffset < len(p.Data) {
+		p.Data[p.Format.BallOffset] = ball
+	}
 }
 
 func (p *Pokemon) TradeBlockReason() string {

@@ -181,7 +181,7 @@ func (s *SaveFile) CompatibilityKey() core.CompatibilityKey {
 }
 
 func (s *SaveFile) Capabilities() core.Capabilities {
-	return core.Capabilities{Party: true, Boxes: true, Evolution: true, Dex: true}
+	return core.Capabilities{Party: true, Boxes: true, Evolution: true, Dex: true, CrossGen: true}
 }
 
 func (s *SaveFile) TrainerInfo() (core.TrainerInfo, error) {

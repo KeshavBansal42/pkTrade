@@ -13,6 +13,7 @@ import (
 	_ "pktrade/internal/gen6"
 	_ "pktrade/internal/gen7"
 	_ "pktrade/internal/gen8"
+	_ "pktrade/internal/xgen"
 )
 
 type PokemonResponse struct {

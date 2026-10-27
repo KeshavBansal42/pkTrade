@@ -76,7 +76,7 @@ func (s *SaveFile) CompatibilityKey() core.CompatibilityKey {
 	return core.CompatibilityKey{Generation: 8, Family: "swsh", Format: 8}
 }
 func (s *SaveFile) Capabilities() core.Capabilities {
-	return core.Capabilities{Party: true, Boxes: true, Evolution: true, Dex: false}
+	return core.Capabilities{Party: true, Boxes: true, Evolution: true, Dex: false, CrossGen: true}
 }
 func (s *SaveFile) Validate() error {
 	box, err := s.block(keyBox)

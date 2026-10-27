@@ -139,7 +139,7 @@ func (s *SaveFile) CompatibilityKey() core.CompatibilityKey {
 	return core.CompatibilityKey{Generation: 5, Family: s.family, Format: 5}
 }
 func (s *SaveFile) Capabilities() core.Capabilities {
-	return core.Capabilities{Party: true, Boxes: true, Evolution: true, Dex: true}
+	return core.Capabilities{Party: true, Boxes: true, Evolution: true, Dex: true, CrossGen: true}
 }
 func (s *SaveFile) Validate() error {
 	if !validTable(s.data, s.table) {

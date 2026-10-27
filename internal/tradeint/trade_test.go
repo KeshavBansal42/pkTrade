@@ -18,6 +18,7 @@ import (
 	_ "pktrade/internal/gen6"
 	_ "pktrade/internal/gen7"
 	_ "pktrade/internal/gen8"
+	_ "pktrade/internal/xgen"
 )
 
 func loadFixture(t *testing.T, path string) core.SaveFile {
@@ -210,15 +211,90 @@ func TestTradeEvolutionIsApplied(t *testing.T) {
 	}
 }
 
-func TestCrossGenerationTradeIsRejected(t *testing.T) {
+func TestCrossGenerationTradeIsSupported(t *testing.T) {
 	saveA := loadFixture(t, "../gen6/testdata/xy.bin.gz")
 	saveB := loadFixture(t, "../gen7/testdata/sm.bin.gz")
+	speciesA, speciesB := 25, 700
+	setSpecies(t, saveA, core.Party(2), uint16(speciesA))
+	setSpecies(t, saveB, core.Party(2), uint16(speciesB))
+
+	preview := core.PreviewTrade(saveA, saveB, core.Party(2), core.Party(2))
+	if !preview.Supported {
+		t.Fatalf("cross-generation trade not supported: %s", preview.Message)
+	}
+	if !preview.Lossy || len(preview.Losses) == 0 {
+		t.Errorf("a cross-generation transfer must list its losses: %+v", preview)
+	}
+
+	result, err := core.ExecuteTrade(saveA, saveB, core.Party(2), core.Party(2))
+	if err != nil {
+		t.Fatalf("cross-generation trade failed: %v", err)
+	}
+	reloadedA, err := core.LoadSaveFromBytes(result.SaveA)
+	if err != nil {
+		t.Fatalf("reload save A: %v", err)
+	}
+	reloadedB, err := core.LoadSaveFromBytes(result.SaveB)
+	if err != nil {
+		t.Fatalf("reload save B: %v", err)
+	}
+	gotA, err := reloadedA.(core.Storage).ReadSlot(core.Party(2))
+	if err != nil {
+		t.Fatalf("read save A: %v", err)
+	}
+	gotB, err := reloadedB.(core.Storage).ReadSlot(core.Party(2))
+	if err != nil {
+		t.Fatalf("read save B: %v", err)
+	}
+	if gotA.GetSpecies() != uint16(speciesB) {
+		t.Errorf("save A party slot 2 species = %d, want %d", gotA.GetSpecies(), speciesB)
+	}
+	if gotB.GetSpecies() != uint16(speciesA) {
+		t.Errorf("save B party slot 2 species = %d, want %d", gotB.GetSpecies(), speciesA)
+	}
+}
+
+func TestCrossGenerationBothDirections(t *testing.T) {
+	saveA := loadFixture(t, "../gen4/testdata/dp.bin.gz")
+	saveB := loadFixture(t, "../gen6/testdata/xy.bin.gz")
+	setSpecies(t, saveA, core.Party(1), 25)
+	setSpecies(t, saveB, core.Party(1), 6)
+
+	preview := core.PreviewTrade(saveA, saveB, core.Party(1), core.Party(1))
+	if !preview.Supported {
+		t.Fatalf("Gen 4 <-> Gen 6 trade not supported: %s", preview.Message)
+	}
+	result, err := core.ExecuteTrade(saveA, saveB, core.Party(1), core.Party(1))
+	if err != nil {
+		t.Fatalf("trade failed: %v", err)
+	}
+	reloadedA, err := core.LoadSaveFromBytes(result.SaveA)
+	if err != nil {
+		t.Fatalf("reload A: %v", err)
+	}
+	reloadedB, err := core.LoadSaveFromBytes(result.SaveB)
+	if err != nil {
+		t.Fatalf("reload B: %v", err)
+	}
+	gotA, _ := reloadedA.(core.Storage).ReadSlot(core.Party(1))
+	gotB, _ := reloadedB.(core.Storage).ReadSlot(core.Party(1))
+	if gotA.GetSpecies() != 6 {
+		t.Errorf("save A species = %d, want 6", gotA.GetSpecies())
+	}
+	if gotB.GetSpecies() != 25 {
+		t.Errorf("save B species = %d, want 25", gotB.GetSpecies())
+	}
+}
+
+func TestCrossGenerationBlocksSpeciesOutsideTargetDex(t *testing.T) {
+	saveA := loadFixture(t, "../gen4/testdata/dp.bin.gz")
+	saveB := loadFixture(t, "../gen6/testdata/xy.bin.gz")
+	// 700 (a Gen 5 species) does not exist in Gen 4's 493-species dex.
+	setSpecies(t, saveB, core.Party(1), 700)
+
 	preview := core.PreviewTrade(saveA, saveB, core.Party(1), core.Party(1))
 	if preview.Supported {
-		t.Fatal("cross-generation trades must not be supported")
-	}
-	if preview.Lossy || len(preview.Losses) != 0 {
-		t.Errorf("rejected preview must not report losses: %+v", preview)
+		t.Fatalf("a species outside the target dex must block the trade: %s", preview.Message)
 	}
 }
 
@@ -269,6 +345,9 @@ func TestEveryGenerationAdvertisesItsFamily(t *testing.T) {
 		}
 		if !caps.Capabilities().Party || !caps.Capabilities().Boxes {
 			t.Errorf("%s capabilities = %+v", tc.path, caps.Capabilities())
+		}
+		if !caps.Capabilities().CrossGen {
+			t.Errorf("%s does not advertise cross-generation support", tc.path)
 		}
 	}
 }
